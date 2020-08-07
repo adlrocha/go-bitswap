@@ -457,10 +457,10 @@ func (bs *Bitswap) updateReceiveCounters(blocks []blocks.Block) {
 		c := bs.counters
 
 		c.blocksRecvd++
-		c.dataRecvd += uint64(blkLen)
+		c.blockDataRecvd += uint64(blkLen)
 		if has {
 			c.dupBlocksRecvd++
-			c.blockDataRecvd += uint64(blkLen)
+			c.dupDataRecvd += uint64(blkLen)
 		}
 	}
 }
