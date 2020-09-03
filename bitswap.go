@@ -35,6 +35,8 @@ import (
 	process "github.com/jbenet/goprocess"
 	procctx "github.com/jbenet/goprocess/context"
 	peer "github.com/libp2p/go-libp2p-core/peer"
+
+	pbr "github.com/ipfs/go-bitswap/internal/peerblockregistry"
 )
 
 var log = logging.Logger("bitswap")
@@ -148,6 +150,11 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 	pm := bspm.New(ctx, peerQueueFactory, network.Self())
 	pqm := bspqm.New(ctx, network)
 
+	// Initialize peer-block registry
+	// TODO: Starting a flat one. This should be configurable or fix to the one
+	// that works best.
+	peerBlockRegistry := pbr.NewFlatPeerBlock()
+
 	sessionFactory := func(
 		sessctx context.Context,
 		sessmgr bssession.SessionManager,
@@ -159,15 +166,16 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 		notif notifications.PubSub,
 		provSearchDelay time.Duration,
 		rebroadcastDelay delay.D,
-		self peer.ID) bssm.Session {
-		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self)
+		self peer.ID,
+		peerBlockRegistry pbr.PeerBlockRegistry) bssm.Session {
+		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self, peerBlockRegistry)
 	}
 	sessionPeerManagerFactory := func(ctx context.Context, id uint64) bssession.SessionPeerManager {
 		return bsspm.New(id, network.ConnectionManager())
 	}
 	notif := notifications.New()
-	sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self())
-	engine := decision.NewEngine(ctx, bstore, network.ConnectionManager(), network.Self())
+	sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self(), peerBlockRegistry)
+	engine := decision.NewEngine(ctx, bstore, network.ConnectionManager(), network.Self(), peerBlockRegistry)
 
 	bs := &Bitswap{
 		blockstore:       bstore,

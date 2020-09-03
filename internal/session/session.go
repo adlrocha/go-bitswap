@@ -17,6 +17,8 @@ import (
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	loggables "github.com/libp2p/go-libp2p-loggables"
 	"go.uber.org/zap"
+
+	pbr "github.com/ipfs/go-bitswap/internal/peerblockregistry"
 )
 
 var log = logging.Logger("bs:sess")
@@ -115,6 +117,8 @@ type Session struct {
 	sws sessionWantSender
 
 	// Used to track times that we need to resort to DHT
+	// TODO: This may add some overhead over normal operation.
+	// Should be removed after testing.
 	numDHTProviders map[cid.Cid][]peer.ID
 	numDHTCount     uint64
 	numDHTLock      sync.Mutex
@@ -138,6 +142,9 @@ type Session struct {
 	id    uint64
 
 	self peer.ID
+
+	// Peer Block Registry to be used
+	peerBlockRegistry pbr.PeerBlockRegistry
 }
 
 // New creates a new bitswap session whose lifetime is bounded by the
@@ -154,7 +161,8 @@ func New(
 	notif notifications.PubSub,
 	initialSearchDelay time.Duration,
 	periodicSearchDelay delay.D,
-	self peer.ID) *Session {
+	self peer.ID,
+	peerBlockRegistry pbr.PeerBlockRegistry) *Session {
 
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Session{
@@ -177,6 +185,7 @@ func New(
 		initialSearchDelay:  initialSearchDelay,
 		periodicSearchDelay: periodicSearchDelay,
 		self:                self,
+		peerBlockRegistry:   peerBlockRegistry,
 	}
 	s.sws = newSessionWantSender(id, pm, sprm, sm, bpm, s.onWantsSent, s.onPeersExhausted)
 
@@ -359,6 +368,8 @@ func (s *Session) broadcast(ctx context.Context, wants []cid.Cid) {
 		wants = s.sw.PrepareBroadcast()
 	}
 
+	// Broadcast a want-block to the latest peers in the peerBlockRegistry that have requested CID.
+	s.broadcastWantBlocksPBR(ctx, wants)
 	// Broadcast a want-have for the live wants to everyone we're connected to
 	s.broadcastWantHaves(ctx, wants)
 
@@ -489,6 +500,9 @@ func (s *Session) wantBlocks(ctx context.Context, newks []cid.Cid) {
 	ks := s.sw.GetNextWants()
 	if len(ks) > 0 {
 		log.Infow("No peers - broadcasting", "session", s.id, "want-count", len(ks))
+		// First send want-blocks to candidates of PBR.
+		s.broadcastWantBlocksPBR(ctx, ks)
+		// Then send want-haves to all connected peers.
 		s.broadcastWantHaves(ctx, ks)
 	}
 }
@@ -497,6 +511,21 @@ func (s *Session) wantBlocks(ctx context.Context, newks []cid.Cid) {
 func (s *Session) broadcastWantHaves(ctx context.Context, wants []cid.Cid) {
 	log.Debugw("broadcastWantHaves", "session", s.id, "cids", wants)
 	s.pm.BroadcastWantHaves(ctx, wants)
+}
+
+// Send want-blocks to peers that recently sent want messages for CID. According to peerblockregistry
+func (s *Session) broadcastWantBlocksPBR(ctx context.Context, wants []cid.Cid) {
+	log.Debugw("broadcastWantBlockPBR", "session", s.id, "cids", wants)
+	// TODO: Is there a more efficient way of implementing this so we aggregate CIDs for
+	// peers and we don't make individual calls to sendWants?
+	for _, w := range wants {
+		// Get latest peers that sent that want message
+		candidates := s.peerBlockRegistry.GetCandidates(w)
+		// Send a want-block to each of them
+		for _, c := range candidates {
+			s.pm.SendWants(ctx, c, []cid.Cid{w}, nil)
+		}
+	}
 }
 
 // The session will broadcast if it has outstanding wants and doesn't receive

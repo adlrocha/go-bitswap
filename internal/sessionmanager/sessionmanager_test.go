@@ -15,6 +15,7 @@ import (
 	bssim "github.com/ipfs/go-bitswap/internal/sessioninterestmanager"
 	"github.com/ipfs/go-bitswap/internal/testutil"
 
+	pbr "github.com/ipfs/go-bitswap/internal/peerblockregistry"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	peer "github.com/libp2p/go-libp2p-core/peer"
@@ -44,8 +45,9 @@ func (fs *fakeSession) ReceiveFrom(p peer.ID, ks []cid.Cid, wantBlocks []cid.Cid
 	fs.wantBlocks = append(fs.wantBlocks, wantBlocks...)
 	fs.wantHaves = append(fs.wantHaves, wantHaves...)
 }
-func (fs *fakeSession) Shutdown() {
+func (fs *fakeSession) Shutdown() uint64 {
 	fs.sm.RemoveSession(fs.id)
+	return 0
 }
 
 type fakeSesPeerManager struct {
@@ -89,7 +91,8 @@ func sessionFactory(ctx context.Context,
 	notif notifications.PubSub,
 	provSearchDelay time.Duration,
 	rebroadcastDelay delay.D,
-	self peer.ID) Session {
+	self peer.ID,
+	peerBlockRegistry pbr.PeerBlockRegistry) Session {
 	fs := &fakeSession{
 		id:    id,
 		pm:    sprm.(*fakeSesPeerManager),
@@ -116,7 +119,9 @@ func TestReceiveFrom(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+	peerBlockRegistry := pbr.NewFlatPeerBlock()
+
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
@@ -163,7 +168,8 @@ func TestReceiveBlocksWhenManagerShutdown(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+	peerBlockRegistry := pbr.NewFlatPeerBlock()
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
@@ -197,7 +203,8 @@ func TestReceiveBlocksWhenSessionContextCancelled(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+	peerBlockRegistry := pbr.NewFlatPeerBlock()
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
@@ -233,7 +240,8 @@ func TestShutdown(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+	peerBlockRegistry := pbr.NewFlatPeerBlock()
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))

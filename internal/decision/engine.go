@@ -20,6 +20,8 @@ import (
 	"github.com/ipfs/go-peertaskqueue/peertask"
 	process "github.com/jbenet/goprocess"
 	peer "github.com/libp2p/go-libp2p-core/peer"
+
+	pbr "github.com/ipfs/go-bitswap/internal/peerblockregistry"
 )
 
 // TODO consider taking responsibility for other types of requests. For
@@ -167,15 +169,19 @@ type Engine struct {
 	sendDontHaves bool
 
 	self peer.ID
+
+	// data structure used to track inspected want messages.
+	peerBlockRegistry pbr.PeerBlockRegistry
 }
 
 // NewEngine creates a new block sending engine for the given block store
-func NewEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger, self peer.ID) *Engine {
-	return newEngine(ctx, bs, peerTagger, self, maxBlockSizeReplaceHasWithBlock, nil)
+func NewEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger, self peer.ID, peerBlockRegistry pbr.PeerBlockRegistry) *Engine {
+	return newEngine(ctx, bs, peerTagger, self, peerBlockRegistry, maxBlockSizeReplaceHasWithBlock, nil)
 }
 
 // This constructor is used by the tests
 func newEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger, self peer.ID,
+	peerBlockRegistry pbr.PeerBlockRegistry,
 	maxReplaceSize int, scoreLedger ScoreLedger) *Engine {
 
 	e := &Engine{
@@ -190,6 +196,7 @@ func newEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger,
 		taskWorkerCount:                 taskWorkerCount,
 		sendDontHaves:                   true,
 		self:                            self,
+		peerBlockRegistry:               peerBlockRegistry,
 	}
 	e.tagQueued = fmt.Sprintf(tagFormat, "queued", uuid.New().String())
 	e.tagUseful = fmt.Sprintf(tagFormat, "useful", uuid.New().String())
@@ -491,6 +498,9 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 
 		// Add each want-have / want-block to the ledger
 		l.Wants(c, entry.Priority, entry.WantType)
+
+		// TODO: RFC Update peerblockregistry here.
+		e.peerBlockRegistry.UpdateRegistry(p, c, entry.Priority)
 
 		// If the block was not found
 		if !found {

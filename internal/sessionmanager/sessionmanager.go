@@ -14,6 +14,8 @@ import (
 	bssim "github.com/ipfs/go-bitswap/internal/sessioninterestmanager"
 	exchange "github.com/ipfs/go-ipfs-exchange-interface"
 	peer "github.com/libp2p/go-libp2p-core/peer"
+
+	pbr "github.com/ipfs/go-bitswap/internal/peerblockregistry"
 )
 
 // Session is a session that is managed by the session manager
@@ -36,7 +38,8 @@ type SessionFactory func(
 	notif notifications.PubSub,
 	provSearchDelay time.Duration,
 	rebroadcastDelay delay.D,
-	self peer.ID) Session
+	self peer.ID,
+	peerBlockRegistry pbr.PeerBlockRegistry) Session
 
 // PeerManagerFactory generates a new peer manager for a session.
 type PeerManagerFactory func(ctx context.Context, id uint64) bssession.SessionPeerManager
@@ -61,11 +64,13 @@ type SessionManager struct {
 	sessID   uint64
 
 	self peer.ID
+
+	peerBlockRegistry pbr.PeerBlockRegistry
 }
 
 // New creates a new SessionManager.
 func New(ctx context.Context, sessionFactory SessionFactory, sessionInterestManager *bssim.SessionInterestManager, peerManagerFactory PeerManagerFactory,
-	blockPresenceManager *bsbpm.BlockPresenceManager, peerManager bssession.PeerManager, notif notifications.PubSub, self peer.ID) *SessionManager {
+	blockPresenceManager *bsbpm.BlockPresenceManager, peerManager bssession.PeerManager, notif notifications.PubSub, self peer.ID, peerBlockRegistry pbr.PeerBlockRegistry) *SessionManager {
 
 	return &SessionManager{
 		ctx:                    ctx,
@@ -77,6 +82,7 @@ func New(ctx context.Context, sessionFactory SessionFactory, sessionInterestMana
 		notif:                  notif,
 		sessions:               make(map[uint64]Session),
 		self:                   self,
+		peerBlockRegistry:      peerBlockRegistry,
 	}
 }
 
@@ -88,7 +94,7 @@ func (sm *SessionManager) NewSession(ctx context.Context,
 	id := sm.GetNextSessionID()
 
 	pm := sm.peerManagerFactory(ctx, id)
-	session := sm.sessionFactory(ctx, sm, id, pm, sm.sessionInterestManager, sm.peerManager, sm.blockPresenceManager, sm.notif, provSearchDelay, rebroadcastDelay, sm.self)
+	session := sm.sessionFactory(ctx, sm, id, pm, sm.sessionInterestManager, sm.peerManager, sm.blockPresenceManager, sm.notif, provSearchDelay, rebroadcastDelay, sm.self, sm.peerBlockRegistry)
 
 	sm.sessLk.Lock()
 	if sm.sessions != nil { // check if SessionManager was shutdown
