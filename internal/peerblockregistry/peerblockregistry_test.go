@@ -31,6 +31,12 @@ func TestFlatPBR(t *testing.T) {
 	if candidates0[0] != peers[1] || candidates0[1] != peers[0] {
 		t.Fatalf("Wrong order of peers for %s", cids[0])
 	}
+	// Test entries not duplicated
+	pbr.UpdateRegistry(peers[0], cids[0], 0)
+	candidates0 = pbr.GetCandidates(cids[0])
+	if len(candidates0) != 2 {
+		t.Fatalf("Wrong number of candidates for %s. Shouold be 2 got %d", cids[0], len(candidates0))
+	}
 	// Test that the maximum number is allowed.
 	peers = testutil.GeneratePeers(12)
 	for _, p := range peers {
