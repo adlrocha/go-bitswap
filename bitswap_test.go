@@ -482,11 +482,9 @@ func TestBasicBitswap(t *testing.T) {
 
 	t.Log("stat node 0")
 	assertStat(t, st0, 1, 0, uint64(len(blk.RawData())), 0)
-	t.Log(st0)
 
 	t.Log("stat node 1")
 	assertStat(t, st1, 0, 1, 0, uint64(len(blk.RawData())))
-	t.Log(st1)
 
 	t.Log("stat node 2")
 	assertStat(t, st2, 0, 0, 0, 0)
