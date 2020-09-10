@@ -368,6 +368,10 @@ func (s *Session) broadcast(ctx context.Context, wants []cid.Cid) {
 		wants = s.sw.PrepareBroadcast()
 	}
 
+	// TODO: Instead of sending wantBlocks and wantHaves together we could send first
+	// want-blocks, wait for a bit and then send want-haves to limit the number of wants exchanged.
+	// But how much should we wait?
+
 	// Broadcast a want-block to the latest peers in the peerBlockRegistry that have requested CID.
 	s.broadcastWantBlocksPBR(ctx, wants)
 	// Broadcast a want-have for the live wants to everyone we're connected to
