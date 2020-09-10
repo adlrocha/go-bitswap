@@ -520,6 +520,14 @@ func (s *Session) broadcastWantHaves(ctx context.Context, wants []cid.Cid) {
 // Send want-blocks to peers that recently sent want messages for CID. According to peerblockregistry
 func (s *Session) broadcastWantBlocksPBR(ctx context.Context, wants []cid.Cid) {
 	log.Debugw("broadcastWantBlockPBR", "session", s.id, "cids", wants)
+	// If nil peerBlockRegistry return
+	// TODO: Now if pbrEnabled == false we don't update the registry so no wantBlocks
+	// will be sent. It'd better if we leverage that variable to avoid entering
+	// this function.
+	if s.peerBlockRegistry == nil {
+		return
+	}
+
 	// TODO: Is there a more efficient way of implementing this so we aggregate CIDs for
 	// peers and we don't make individual calls to sendWants?
 	for _, w := range wants {

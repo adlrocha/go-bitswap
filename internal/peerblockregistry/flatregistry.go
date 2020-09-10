@@ -12,7 +12,7 @@ type FlatRegistry struct {
 	pbrLk   sync.RWMutex
 }
 
-func NewFlatPeerBlock() PeerBlockRegistry {
+func NewFlatRegistry() PeerBlockRegistry {
 	return &FlatRegistry{
 		CidList: make(map[cid.Cid][]peer.ID),
 	}

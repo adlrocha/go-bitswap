@@ -99,8 +99,9 @@ func newTestEngine(ctx context.Context, idStr string) engineSet {
 func newTestEngineWithSampling(ctx context.Context, idStr string, peerSampleInterval time.Duration, sampleCh chan struct{}) engineSet {
 	fpt := &fakePeerTagger{}
 	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
-	peerBlockRegistry := pbr.NewFlatPeerBlock()
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
 	e := newEngine(ctx, bs, fpt, "localhost", peerBlockRegistry, 0, NewTestScoreLedger(peerSampleInterval, sampleCh))
+	e.pbrEnabled = true
 	e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
 	return engineSet{
 		Peer: peer.ID(idStr),
@@ -188,7 +189,8 @@ func peerIsPartner(p peer.ID, e *Engine) bool {
 func TestOutboxClosedWhenEngineClosed(t *testing.T) {
 	ctx := context.Background()
 	t.SkipNow() // TODO implement *Engine.Close
-	e := newEngine(ctx, blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore())), &fakePeerTagger{}, "localhost", pbr.NewFlatPeerBlock(), 0, NewTestScoreLedger(shortTerm, nil))
+	e := newEngine(ctx, blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore())), &fakePeerTagger{}, "localhost", pbr.NewPeerBlockRegistry("hamt"), 0, NewTestScoreLedger(shortTerm, nil))
+	e.pbrEnabled = true
 	e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -515,9 +517,10 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 	if len(onlyTestCases) > 0 {
 		testCases = onlyTestCases
 	}
-	peerBlockRegistry := pbr.NewFlatPeerBlock()
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
 
 	e := newEngine(context.Background(), bs, &fakePeerTagger{}, "localhost", peerBlockRegistry, 0, NewTestScoreLedger(shortTerm, nil))
+	e.pbrEnabled = true
 	e.StartWorkers(context.Background(), process.WithTeardown(func() error { return nil }))
 	for i, testCase := range testCases {
 		t.Logf("Test case %d:", i)
@@ -672,9 +675,10 @@ func TestPartnerWantHaveWantBlockActive(t *testing.T) {
 	if len(onlyTestCases) > 0 {
 		testCases = onlyTestCases
 	}
-	peerBlockRegistry := pbr.NewFlatPeerBlock()
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
 
 	e := newEngine(context.Background(), bs, &fakePeerTagger{}, "localhost", peerBlockRegistry, 0, NewTestScoreLedger(shortTerm, nil))
+	e.pbrEnabled = true
 	e.StartWorkers(context.Background(), process.WithTeardown(func() error { return nil }))
 
 	var next envChan
@@ -849,7 +853,7 @@ func TestPartnerWantsThenCancels(t *testing.T) {
 	}
 
 	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
-	peerBlockRegistry := pbr.NewFlatPeerBlock()
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
 
 	for _, letter := range alphabet {
 		block := blocks.NewBlock([]byte(letter))
@@ -863,6 +867,7 @@ func TestPartnerWantsThenCancels(t *testing.T) {
 		expected := make([][]string, 0, len(testcases))
 
 		e := newEngine(ctx, bs, &fakePeerTagger{}, "localhost", peerBlockRegistry, 0, NewTestScoreLedger(shortTerm, nil))
+		e.pbrEnabled = true
 		e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
 		for _, testcase := range testcases {
 			set := testcase[0]
@@ -886,9 +891,10 @@ func TestSendReceivedBlocksToPeersThatWantThem(t *testing.T) {
 	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
 	partner := libp2ptest.RandPeerIDFatal(t)
 	otherPeer := libp2ptest.RandPeerIDFatal(t)
-	peerBlockRegistry := pbr.NewFlatPeerBlock()
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
 
 	e := newEngine(context.Background(), bs, &fakePeerTagger{}, "localhost", peerBlockRegistry, 0, NewTestScoreLedger(shortTerm, nil))
+	e.pbrEnabled = true
 	e.StartWorkers(context.Background(), process.WithTeardown(func() error { return nil }))
 
 	blks := testutil.GenerateBlocksOfSize(4, 8*1024)
@@ -931,9 +937,10 @@ func TestSendDontHave(t *testing.T) {
 	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
 	partner := libp2ptest.RandPeerIDFatal(t)
 	otherPeer := libp2ptest.RandPeerIDFatal(t)
-	peerBlockRegistry := pbr.NewFlatPeerBlock()
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
 
 	e := newEngine(context.Background(), bs, &fakePeerTagger{}, "localhost", peerBlockRegistry, 0, NewTestScoreLedger(shortTerm, nil))
+	e.pbrEnabled = true
 	e.StartWorkers(context.Background(), process.WithTeardown(func() error { return nil }))
 
 	blks := testutil.GenerateBlocksOfSize(4, 8*1024)
@@ -996,9 +1003,10 @@ func TestWantlistForPeer(t *testing.T) {
 	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
 	partner := libp2ptest.RandPeerIDFatal(t)
 	otherPeer := libp2ptest.RandPeerIDFatal(t)
-	peerBlockRegistry := pbr.NewFlatPeerBlock()
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
 
 	e := newEngine(context.Background(), bs, &fakePeerTagger{}, "localhost", peerBlockRegistry, 0, NewTestScoreLedger(shortTerm, nil))
+	e.pbrEnabled = true
 	e.StartWorkers(context.Background(), process.WithTeardown(func() error { return nil }))
 
 	blks := testutil.GenerateBlocksOfSize(4, 8*1024)

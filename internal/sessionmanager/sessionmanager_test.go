@@ -119,7 +119,7 @@ func TestReceiveFrom(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	peerBlockRegistry := pbr.NewFlatPeerBlock()
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
 
 	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 
@@ -168,7 +168,7 @@ func TestReceiveBlocksWhenManagerShutdown(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	peerBlockRegistry := pbr.NewFlatPeerBlock()
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
 	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 
 	p := peer.ID(123)
@@ -203,7 +203,7 @@ func TestReceiveBlocksWhenSessionContextCancelled(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	peerBlockRegistry := pbr.NewFlatPeerBlock()
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
 	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 
 	p := peer.ID(123)
@@ -240,7 +240,7 @@ func TestShutdown(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	peerBlockRegistry := pbr.NewFlatPeerBlock()
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
 	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 
 	p := peer.ID(123)

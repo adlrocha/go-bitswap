@@ -10,7 +10,7 @@ import (
 )
 
 func TestFlatPBR(t *testing.T) {
-	pbr := NewFlatPeerBlock()
+	pbr := NewFlatRegistry()
 	cids := testutil.GenerateCids(3)
 	peers := testutil.GeneratePeers(2)
 

@@ -20,6 +20,17 @@ type PeerBlockRegistry interface {
 	GarbageCollect()
 }
 
+// NewPeerBlockRegistry build a new PeerBlockRegistry from type
+func NewPeerBlockRegistry(pbrType string) PeerBlockRegistry {
+	switch pbrType {
+	case "flat":
+		return NewFlatRegistry()
+	case "hamt":
+		return NewHAMTRegistry()
+	}
+	return nil
+}
+
 // // PeerBlockEntry information that want to be tracked when inspecting
 // // Wantlists.
 // // TODO: Currently we don't use all this information so entries will be peerIDs.

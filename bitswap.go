@@ -68,6 +68,14 @@ var (
 // bitswap instances
 type Option func(*Bitswap)
 
+// PeerBlockRegistryEnabled to use peerBlockRegistry
+func PeerBlockRegistryEnabled(pbrEnabled bool) Option {
+	return func(bs *Bitswap) {
+		bs.pbrEnabled = pbrEnabled
+		bs.engine.SetPBR(pbrEnabled)
+	}
+}
+
 // ProvideEnabled is an option for enabling/disabling provide announcements
 func ProvideEnabled(enabled bool) Option {
 	return func(bs *Bitswap) {
@@ -151,10 +159,8 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 	pm := bspm.New(ctx, peerQueueFactory, network.Self())
 	pqm := bspqm.New(ctx, network)
 
-	// Initialize peer-block registry
-	// TODO: Starting a flat one. This should be configurable or fix to the one
-	// that works best.
-	peerBlockRegistry := pbr.NewFlatPeerBlock()
+	// TODO: Should make pbr type configurable
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
 
 	sessionFactory := func(
 		sessctx context.Context,
@@ -197,6 +203,7 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 		provideEnabled:   true,
 		provSearchDelay:  defaultProvSearchDelay,
 		rebroadcastDelay: delay.Fixed(time.Minute),
+		pbrEnabled:       true,
 	}
 
 	// apply functional options before starting and running bitswap
@@ -283,6 +290,9 @@ type Bitswap struct {
 
 	// how often to rebroadcast providing requests to find more optimized providers
 	rebroadcastDelay delay.D
+
+	// Enables the use of peerBlockRegistry
+	pbrEnabled bool
 }
 
 type counters struct {

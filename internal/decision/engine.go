@@ -168,6 +168,8 @@ type Engine struct {
 
 	sendDontHaves bool
 
+	pbrEnabled bool
+
 	self peer.ID
 
 	// data structure used to track inspected want messages.
@@ -242,6 +244,13 @@ func (e *Engine) startScoreLedger(px process.Process) {
 		<-ppx.Closing()
 		e.scoreLedger.Stop()
 	})
+}
+
+// SetPBR sets the use of peer-block registry. This data structure tracks
+// the want messages exchange by neighbors and use this information to send
+// a WANT-BLOCK with the WANT-HAVEs when starting a session.
+func (e *Engine) SetPBR(pbrEnabled bool) {
+	e.pbrEnabled = pbrEnabled
 }
 
 // Start up workers to handle requests from other nodes for the data on this node
@@ -499,8 +508,10 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 		// Add each want-have / want-block to the ledger
 		l.Wants(c, entry.Priority, entry.WantType)
 
-		// TODO: RFC Update peerblockregistry here.
-		e.peerBlockRegistry.UpdateRegistry(p, c, entry.Priority)
+		// If enabled, Update peerblockregistry here.
+		if e.pbrEnabled {
+			e.peerBlockRegistry.UpdateRegistry(p, c, entry.Priority)
+		}
 
 		// If the block was not found
 		if !found {
