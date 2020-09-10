@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	bsbpm "github.com/ipfs/go-bitswap/internal/blockpresencemanager"
@@ -116,13 +115,6 @@ type Session struct {
 	sw  sessionWants
 	sws sessionWantSender
 
-	// Used to track times that we need to resort to DHT
-	// TODO: This may add some overhead over normal operation.
-	// Should be removed after testing.
-	numDHTProviders map[cid.Cid][]peer.ID
-	numDHTCount     uint64
-	numDHTLock      sync.Mutex
-
 	latencyTrkr latencyTracker
 
 	// channels
@@ -174,7 +166,6 @@ func New(
 		pm:                  pm,
 		sprm:                sprm,
 		providerFinder:      providerFinder,
-		numDHTProviders:     make(map[cid.Cid][]peer.ID),
 		sim:                 sim,
 		incoming:            make(chan op, 128),
 		latencyTrkr:         latencyTracker{},
@@ -198,11 +189,8 @@ func (s *Session) ID() uint64 {
 	return s.id
 }
 
-func (s *Session) Shutdown() uint64 {
+func (s *Session) Shutdown() {
 	s.shutdown()
-	// Return the numDHT count when shutting down the session
-	// so it is updated in the seessionManager.
-	return s.numDHTCount
 }
 
 // ReceiveFrom receives incoming blocks from the given peer.
@@ -420,7 +408,7 @@ func (s *Session) findMorePeers(ctx context.Context, c cid.Cid) {
 			// the providing peer sending a HAVE
 			s.sws.Update(p, nil, []cid.Cid{c}, nil)
 			// Track peers found through the DHT.
-			s.numDHTProviders[k] = append(s.numDHTProviders[k], p)
+			// s.numDHTProviders[k] = append(s.numDHTProviders[k], p)
 
 		}
 	}(c)
@@ -441,18 +429,18 @@ func (s *Session) handleShutdown() {
 }
 
 // Update times that we resorted to the DHT
-func (s *Session) updateNumDHT(ks []cid.Cid, from peer.ID) {
-	// If the block found belongs to one of the peers in the provder
-	s.numDHTLock.Lock()
-	defer s.numDHTLock.Unlock()
-	for k := range ks {
-		for _, p := range s.numDHTProviders[ks[k]] {
-			if p == from {
-				s.numDHTCount++
-			}
-		}
-	}
-}
+// func (s *Session) updateNumDHT(ks []cid.Cid, from peer.ID) {
+// 	// If the block found belongs to one of the peers in the provder
+// 	s.numDHTLock.Lock()
+// 	defer s.numDHTLock.Unlock()
+// 	for k := range ks {
+// 		for _, p := range s.numDHTProviders[ks[k]] {
+// 			if p == from {
+// 				s.numDHTCount++
+// 			}
+// 		}
+// 	}
+// }
 
 // handleReceive is called when the session receives blocks from a peer
 func (s *Session) handleReceive(ks []cid.Cid, from peer.ID) {
@@ -464,7 +452,7 @@ func (s *Session) handleReceive(ks []cid.Cid, from peer.ID) {
 	}
 
 	// Record NUM_DHT
-	s.updateNumDHT(wanted, from)
+	// s.updateNumDHT(wanted, from)
 	// Record latency
 	s.latencyTrkr.receiveUpdate(len(wanted), totalLatency)
 

@@ -222,10 +222,6 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 	// do it over here to avoid closing before all setup is done.
 	go func(bs *Bitswap) {
 		<-px.Closing() // process closes first
-		// Update numDHT counters for session when shutting down manager,
-		bs.counterLk.Lock()
-		bs.counters.numDHT = sm.Shutdown()
-		bs.counterLk.Unlock()
 		cancelFunc()
 		notif.Shutdown()
 	}(bs)
@@ -304,7 +300,6 @@ type counters struct {
 	dataSent        uint64
 	dataRecvd       uint64
 	messagesRecvd   uint64
-	numDHT          uint64
 	wantsRecvd      uint64
 	wantHavesRecvd  uint64
 	wantBlocksRecvd uint64

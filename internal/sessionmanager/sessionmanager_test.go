@@ -10,12 +10,12 @@ import (
 
 	bsbpm "github.com/ipfs/go-bitswap/internal/blockpresencemanager"
 	notifications "github.com/ipfs/go-bitswap/internal/notifications"
+	pbr "github.com/ipfs/go-bitswap/internal/peerblockregistry"
 	bspm "github.com/ipfs/go-bitswap/internal/peermanager"
 	bssession "github.com/ipfs/go-bitswap/internal/session"
 	bssim "github.com/ipfs/go-bitswap/internal/sessioninterestmanager"
 	"github.com/ipfs/go-bitswap/internal/testutil"
 
-	pbr "github.com/ipfs/go-bitswap/internal/peerblockregistry"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	peer "github.com/libp2p/go-libp2p-core/peer"
@@ -45,9 +45,8 @@ func (fs *fakeSession) ReceiveFrom(p peer.ID, ks []cid.Cid, wantBlocks []cid.Cid
 	fs.wantBlocks = append(fs.wantBlocks, wantBlocks...)
 	fs.wantHaves = append(fs.wantHaves, wantHaves...)
 }
-func (fs *fakeSession) Shutdown() uint64 {
+func (fs *fakeSession) Shutdown() {
 	fs.sm.RemoveSession(fs.id)
-	return 0
 }
 
 type fakeSesPeerManager struct {
@@ -169,8 +168,8 @@ func TestReceiveBlocksWhenManagerShutdown(t *testing.T) {
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
 	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
 
@@ -204,8 +203,8 @@ func TestReceiveBlocksWhenSessionContextCancelled(t *testing.T) {
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
 	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
 
@@ -241,8 +240,8 @@ func TestShutdown(t *testing.T) {
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
 	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
 	cids := []cid.Cid{block.Cid()}
