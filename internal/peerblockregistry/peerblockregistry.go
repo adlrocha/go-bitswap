@@ -18,6 +18,7 @@ type PeerBlockRegistry interface {
 	GetCandidates(cid cid.Cid) []peer.ID
 	UpdateRegistry(peer peer.ID, cid cid.Cid, priority int32) error
 	GarbageCollect()
+	Clear()
 }
 
 // NewPeerBlockRegistry build a new PeerBlockRegistry from type

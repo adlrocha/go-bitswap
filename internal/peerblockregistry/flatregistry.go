@@ -47,10 +47,15 @@ func (fr *FlatRegistry) UpdateRegistry(p peer.ID, cid cid.Cid, priority int32) e
 	return nil
 }
 
+// Clear cleans the registry.
+func (fr *FlatRegistry) Clear() {
+	*fr = FlatRegistry{
+		CidList: make(map[cid.Cid][]peer.ID),
+	}
+}
+
 // GarbageCollect cleans outdated entries.
 func (fr *FlatRegistry) GarbageCollect() {
-	// TODO:; Do we need a garbage collector if we limit the size of
-	// the registry? One of the problems may be that no want messages
-	// have been received for a long time for CID and you end up sending
-	// WANT-BLOCK to a extremely updated blockEntry.
+	// TODO:; Periodically cleans the registry
+	// to remove old and outdated entries
 }

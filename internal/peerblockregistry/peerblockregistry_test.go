@@ -56,6 +56,12 @@ func TestFlatPBR(t *testing.T) {
 	if candidates[0] != peers[len(peers)-1] {
 		t.Fatalf("Peers being added in wrong order")
 	}
+
+	// Test Clear Registry.
+	pbr.Clear()
+	if len(pbr.(*FlatRegistry).CidList) != 0 {
+		t.Fatalf("The registry wasn't cleared successfully")
+	}
 }
 
 func TestHAMTPBR(t *testing.T) {
@@ -111,5 +117,11 @@ func TestHAMTPBR(t *testing.T) {
 
 	if candidates[0] != peers[len(peers)-1] {
 		t.Fatalf("Peers being added in wrong order")
+	}
+
+	// Test Clear Registry.
+	pbr.Clear()
+	if !pbr.(*HAMTRegistry).CidHAMT.IsEmpty() {
+		t.Fatalf("The registry wasn't cleared successfully")
 	}
 }
