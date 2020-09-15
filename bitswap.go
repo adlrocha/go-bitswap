@@ -5,13 +5,13 @@ package bitswap
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"sync"
 	"time"
 
 	delay "github.com/ipfs/go-ipfs-delay"
 
+	"github.com/ipfs/go-bitswap/compression"
 	deciface "github.com/ipfs/go-bitswap/decision"
 	bsbpm "github.com/ipfs/go-bitswap/internal/blockpresencemanager"
 	decision "github.com/ipfs/go-bitswap/internal/decision"
@@ -60,6 +60,13 @@ var (
 
 	// the 1<<18+15 is to observe old file chunks that are 1<<18 + 14 in size
 	metricsBuckets = []float64{1 << 6, 1 << 10, 1 << 14, 1 << 18, 1<<18 + 15, 1 << 22}
+
+	// TODO: This needs to be set as an option in config.
+	// Compression strategy.
+	// "none": No compression used.
+	// "blocks": Only raw data of blocks is compressed,
+	// "full": Full message compressed.
+	compressionStrategy = "blocks"
 )
 
 // Option defines the functional option type that can be used to configure
@@ -168,7 +175,7 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 	}
 	notif := notifications.New()
 	sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self())
-	engine := decision.NewEngine(ctx, bstore, network.ConnectionManager(), network.Self())
+	engine := decision.NewEngine(ctx, bstore, network.ConnectionManager(), network.Self(), compressionStrategy)
 
 	bs := &Bitswap{
 		blockstore:       bstore,
@@ -295,7 +302,6 @@ func (bs *Bitswap) GetBlock(parent context.Context, k cid.Cid) (blocks.Block, er
 
 // ResetStatCounters reset the stats of the bitswap node.
 func (bs *Bitswap) ResetStatCounters() {
-	fmt.Println("Resetting counters..")
 	bs.counterLk.Lock()
 	bs.counters = new(counters)
 	bs.counterLk.Unlock()
@@ -431,6 +437,8 @@ func (bs *Bitswap) ReceiveMessage(ctx context.Context, p peer.ID, incoming bsmsg
 	bs.counters.dataRecvd += uint64(incoming.Size())
 	bs.counterLk.Unlock()
 
+	// TODO: Uncompress message.
+
 	// This call records changes to wantlists, blocks received,
 	// and number of bytes transfered.
 	bs.engine.MessageReceived(ctx, p, incoming)
@@ -473,9 +481,16 @@ func (bs *Bitswap) ReceiveMessage(ctx context.Context, p peer.ID, incoming bsmsg
 	}(bs)
 
 	iblocks := incoming.Blocks()
-
+	// TODO: If only compressed blocks. Uncompress blocks here.
 	if len(iblocks) > 0 {
 		bs.updateReceiveCounters(iblocks)
+
+		// If compression strategy blocks and there are blocks in the
+		// message, once stats are updated decompress the RawData.
+		if compressionStrategy == "blocks" {
+			iblocks = bs.engine.Compressor().UncompressBlocks(iblocks)
+		}
+
 		for _, b := range iblocks {
 			log.Debugf("[recv] block; cid=%s, peer=%s", b.Cid(), p)
 		}
@@ -602,4 +617,9 @@ func (bs *Bitswap) IsOnline() bool {
 // from go-blockservice, it will create a bitswap session automatically.
 func (bs *Bitswap) NewSession(ctx context.Context) exchange.Fetcher {
 	return bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay)
+}
+
+// Compressor exposes the compressor used.
+func (bs *Bitswap) Compressor() compression.Compressor {
+	return bs.engine.Compressor()
 }

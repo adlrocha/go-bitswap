@@ -5,8 +5,9 @@ import (
 	"time"
 
 	bitswap "github.com/ipfs/go-bitswap"
-	tn "github.com/ipfs/go-bitswap/testnet"
 	bsnet "github.com/ipfs/go-bitswap/network"
+	tn "github.com/ipfs/go-bitswap/testnet"
+	blocks "github.com/ipfs/go-block-format"
 	ds "github.com/ipfs/go-datastore"
 	delayed "github.com/ipfs/go-datastore/delayed"
 	ds_sync "github.com/ipfs/go-datastore/sync"
@@ -129,4 +130,13 @@ func NewInstance(ctx context.Context, net tn.Network, p tnet.Identity, netOption
 		blockstore:      bstore,
 		blockstoreDelay: bsdelay,
 	}
+}
+
+// IfCompressionCompressBlock self-explanatory.
+func (i *Instance) IfCompressionCompressBlock(block blocks.Block) blocks.Block {
+	if i.Exchange.Compressor().Strategy() == "blocks" {
+		compData := i.Exchange.Compressor().Compress(block.RawData())
+		block, _ = blocks.NewBlockWithCid(compData, block.Cid())
+	}
+	return block
 }

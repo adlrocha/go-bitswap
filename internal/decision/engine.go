@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/ipfs/go-bitswap/compression"
 	bsmsg "github.com/ipfs/go-bitswap/message"
 	pb "github.com/ipfs/go-bitswap/message/pb"
 	wl "github.com/ipfs/go-bitswap/wantlist"
@@ -167,16 +168,19 @@ type Engine struct {
 	sendDontHaves bool
 
 	self peer.ID
+
+	// Compression
+	compressor compression.Compressor
 }
 
 // NewEngine creates a new block sending engine for the given block store
-func NewEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger, self peer.ID) *Engine {
-	return newEngine(ctx, bs, peerTagger, self, maxBlockSizeReplaceHasWithBlock, nil)
+func NewEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger, self peer.ID, compressionStrategy string) *Engine {
+	return newEngine(ctx, bs, peerTagger, self, maxBlockSizeReplaceHasWithBlock, nil, compressionStrategy)
 }
 
 // This constructor is used by the tests
 func newEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger, self peer.ID,
-	maxReplaceSize int, scoreLedger ScoreLedger) *Engine {
+	maxReplaceSize int, scoreLedger ScoreLedger, compressionStrategy string) *Engine {
 
 	e := &Engine{
 		ledgerMap:                       make(map[peer.ID]*ledger),
@@ -198,6 +202,9 @@ func newEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger,
 		peertaskqueue.OnPeerRemovedHook(e.onPeerRemoved),
 		peertaskqueue.TaskMerger(newTaskMerger()),
 		peertaskqueue.IgnoreFreezing(true))
+
+	// Current compressor GZip. This should be configurable.
+	e.compressor = compression.NewGzipCompressor(compressionStrategy)
 	return e
 }
 
@@ -378,6 +385,17 @@ func (e *Engine) nextEnvelope(ctx context.Context) (*Envelope, error) {
 			} else {
 				// Add the block to the message
 				// log.Debugf("  make evlp %s->%s block: %s (%d bytes)", e.self, p, c, len(blk.RawData()))
+
+				// If the "blocks" compression strategy enabled. We compress
+				// the RawData of the block keeping the CID of the original content
+				// so what we are identifying is the original content.
+				if e.compressor.Strategy() == "blocks" {
+					compressedData := e.compressor.Compress(blk.RawData())
+					blk, err = blocks.NewBlockWithCid(compressedData, blk.Cid())
+					if err != nil {
+						return nil, err
+					}
+				}
 				msg.AddBlock(blk)
 			}
 		}
@@ -387,6 +405,8 @@ func (e *Engine) nextEnvelope(ctx context.Context) (*Envelope, error) {
 			e.peerRequestQueue.TasksDone(p, nextTasks...)
 			continue
 		}
+
+		// TODO: Compress full message here.
 
 		log.Debugw("Bitswap engine -> msg", "local", e.self, "to", p, "blockCount", len(msg.Blocks()), "presenceCount", len(msg.BlockPresences()), "size", msg.Size())
 		return &Envelope{
@@ -734,4 +754,9 @@ func (e *Engine) signalNewWork() {
 	case e.workSignal <- struct{}{}:
 	default:
 	}
+}
+
+// Compressor returns the engine compression.
+func (e *Engine) Compressor() compression.Compressor {
+	return e.compressor
 }

@@ -76,6 +76,9 @@ type BitSwapMessage interface {
 
 	// Clone the message fields
 	Clone() BitSwapMessage
+
+	// // Compress
+	// Compress(compression.Compressor)
 }
 
 // Exportable is an interface for structures than can be
@@ -162,6 +165,11 @@ func newMsg(full bool) *impl {
 		blockPresences: make(map[cid.Cid]pb.Message_BlockPresenceType),
 	}
 }
+
+// // Compress Bitswap message
+// func (m *impl) Compress(c compression.Compressor) {
+// 	c.Compress()
+// }
 
 // Clone the message fields
 func (m *impl) Clone() BitSwapMessage {
