@@ -3,6 +3,7 @@ package message
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 
 	pb "github.com/ipfs/go-bitswap/message/pb"
@@ -13,6 +14,7 @@ import (
 	pool "github.com/libp2p/go-buffer-pool"
 	msgio "github.com/libp2p/go-msgio"
 
+	"github.com/ipfs/go-bitswap/compression"
 	u "github.com/ipfs/go-ipfs-util"
 	"github.com/libp2p/go-libp2p-core/network"
 )
@@ -77,8 +79,9 @@ type BitSwapMessage interface {
 	// Clone the message fields
 	Clone() BitSwapMessage
 
-	// // Compress
-	// Compress(compression.Compressor)
+	// Sets compression to message
+	SetCompression(pb.Message_CompressionType)
+	HasCompression() pb.Message_CompressionType
 }
 
 // Exportable is an interface for structures than can be
@@ -150,6 +153,7 @@ type impl struct {
 	blocks         map[cid.Cid]blocks.Block
 	blockPresences map[cid.Cid]pb.Message_BlockPresenceType
 	pendingBytes   int32
+	compression    pb.Message_CompressionType
 }
 
 // New returns a new, empty bitswap message
@@ -166,10 +170,15 @@ func newMsg(full bool) *impl {
 	}
 }
 
-// // Compress Bitswap message
-// func (m *impl) Compress(c compression.Compressor) {
-// 	c.Compress()
-// }
+// Setcompression sets compression in message.
+func (m *impl) SetCompression(compression pb.Message_CompressionType) {
+	m.compression = compression
+}
+
+// HasCompression checks if message has compression.
+func (m *impl) HasCompression() pb.Message_CompressionType {
+	return m.compression
+}
 
 // Clone the message fields
 func (m *impl) Clone() BitSwapMessage {
@@ -200,12 +209,25 @@ func (m *impl) Reset(full bool) {
 		delete(m.blockPresences, k)
 	}
 	m.pendingBytes = 0
+	m.compression = pb.Message_None
 }
 
 var errCidMissing = errors.New("missing cid")
 
 func newMessageFromProto(pbm pb.Message) (BitSwapMessage, error) {
+	// Check if the message is compressed and uncompress.
+	if pbm.Compression != pb.Message_None {
+		unpbm, err := uncompressMsg(&pbm)
+		if err != nil {
+			return nil, fmt.Errorf("Error uncompressing message: %w", err)
+		}
+		unpbm.Compression = pbm.Compression
+		pbm = *unpbm
+	}
+
 	m := newMsg(pbm.Wantlist.Full)
+	// Set the compression that was used for the message. Used to get Size()
+	m.compression = pbm.Compression
 	for _, e := range pbm.Wantlist.Entries {
 		if !e.Block.Cid.Defined() {
 			return nil, errCidMissing
@@ -381,6 +403,14 @@ func (m *impl) AddDontHave(c cid.Cid) {
 
 func (m *impl) Size() int {
 	size := 0
+
+	// TODO: This should be removed as it adds
+	// a significant overhead to compress every time.
+	if m.compression != pb.Message_None {
+		pbm := m.ToProtoV1()
+		return pbm.Size()
+	}
+
 	for _, block := range m.blocks {
 		size += len(block.RawData())
 	}
@@ -424,6 +454,54 @@ func FromMsgReader(r msgio.Reader) (BitSwapMessage, error) {
 	return newMessageFromProto(pb)
 }
 
+func intializeCompressor(compressionType pb.Message_CompressionType) compression.Compressor {
+	var compressor compression.Compressor
+
+	// For now we always use Gzip until we have other comrpession algorithms.
+	switch compressionType {
+	case pb.Message_Gzip:
+		compressor = compression.NewGzipCompressor("full")
+	default:
+		compressor = compression.NewGzipCompressor("full")
+	}
+
+	return compressor
+}
+
+func compressMsg(in *pb.Message, compressionType pb.Message_CompressionType) *pb.Message {
+
+	// Initialize compressor.
+	compressor := intializeCompressor(compressionType)
+
+	marshIn, _ := in.Marshal()
+	// Generate compressed payload.
+	payload := compressor.Compress(marshIn)
+	pbm := new(pb.Message)
+
+	// Set compression in message
+	pbm.CompressedPayload = payload
+	pbm.Compression = compressionType
+	return pbm
+}
+
+func uncompressMsg(in *pb.Message) (*pb.Message, error) {
+	// Initialize compressor.
+	compressor := intializeCompressor(in.Compression)
+
+	//Uncompress compressed payload.
+	uncompPayload := compressor.Uncompress(in.CompressedPayload)
+
+	// Unmarshal into pb message
+	var pbm pb.Message
+	err := pbm.Unmarshal(uncompPayload)
+	if err != nil {
+		return nil, fmt.Errorf("Error unmarshalling compressed message_ %w", err)
+	}
+
+	return &pbm, nil
+
+}
+
 func (m *impl) ToProtoV0() *pb.Message {
 	pbm := new(pb.Message)
 	pbm.Wantlist.Entries = make([]pb.Message_Wantlist_Entry, 0, len(m.wantlist))
@@ -437,6 +515,12 @@ func (m *impl) ToProtoV0() *pb.Message {
 	for _, b := range blocks {
 		pbm.Blocks = append(pbm.Blocks, b.RawData())
 	}
+	// If compression enabled, compress the full message and create new compressed message.
+	// Compression in Payload and that's it.
+	if m.compression != pb.Message_None {
+		pbm = compressMsg(pbm, m.compression)
+	}
+
 	return pbm
 }
 
@@ -466,6 +550,12 @@ func (m *impl) ToProtoV1() *pb.Message {
 	}
 
 	pbm.PendingBytes = m.PendingBytes()
+
+	// If compression enabled, compress the full message and create new compressed message.
+	// Compression in Payload and that's it.
+	if m.compression != pb.Message_None {
+		pbm = compressMsg(pbm, m.compression)
+	}
 
 	return pbm
 }

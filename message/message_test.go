@@ -2,6 +2,7 @@ package message
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	pb "github.com/ipfs/go-bitswap/message/pb"
@@ -307,5 +308,68 @@ func TestEntrySize(t *testing.T) {
 	epb := e.ToPB()
 	if e.Size() != epb.Size() {
 		t.Fatal("entry size calculation incorrect", e.Size(), epb.Size())
+	}
+}
+
+func TestCompression(t *testing.T) {
+
+	// Testing using net and V1
+	original := New(true)
+	original.AddBlock(blocks.NewBlock([]byte("W")))
+	original.AddBlock(blocks.NewBlock([]byte("E")))
+	original.AddBlock(blocks.NewBlock([]byte("F")))
+	original.AddBlock(blocks.NewBlock([]byte("M")))
+	original.SetCompression(pb.Message_Gzip)
+
+	buf := new(bytes.Buffer)
+	if err := original.ToNetV1(buf); err != nil {
+		t.Fatal(err)
+	}
+
+	m2, err := FromNet(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if m2.HasCompression() != pb.Message_Gzip {
+		fmt.Println(m2)
+		t.Fatalf("Wrong resulting compression in message: %s", m2.HasCompression())
+	}
+
+	keys := make(map[cid.Cid]bool)
+	for _, b := range m2.Blocks() {
+		keys[b.Cid()] = true
+	}
+
+	for _, b := range original.Blocks() {
+		if _, ok := keys[b.Cid()]; !ok {
+			t.Fail()
+		}
+	}
+
+	// Testing using V0
+	buf = new(bytes.Buffer)
+	if err := original.ToNetV0(buf); err != nil {
+		t.Fatal(err)
+	}
+
+	m2, err = FromNet(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if m2.HasCompression() != pb.Message_Gzip {
+		t.Fatalf("Wrong resulting compression in message")
+	}
+
+	keys = make(map[cid.Cid]bool)
+	for _, b := range m2.Blocks() {
+		keys[b.Cid()] = true
+	}
+
+	for _, b := range original.Blocks() {
+		if _, ok := keys[b.Cid()]; !ok {
+			t.Fail()
+		}
 	}
 }

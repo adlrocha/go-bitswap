@@ -38,9 +38,16 @@ message Message {
     BlockPresenceType type = 2;
   }
 
+  enum CompressionType {
+    None = 0;
+    Gzip = 1;
+  }
+
   Wantlist wantlist = 1 [(gogoproto.nullable) = false];
   repeated bytes blocks = 2;		// used to send Blocks in bitswap 1.0.0
-  repeated Block payload = 3 [(gogoproto.nullable) = false];		// used to send Blocks in bitswap 1.1.0
+  repeated Block payload = 3 [(gogoproto.nullable) = false];		// used to send Blocks in bitswap 1.1.0.
   repeated BlockPresence blockPresences = 4 [(gogoproto.nullable) = false];
   int32 pendingBytes = 5;
+  CompressionType compression = 6; // If cpmpression type nt present should be None
+  bytes compressedPayload = 7;  // We could consider reusing repeated Block payload to send compressed payload also.
 }

@@ -174,13 +174,13 @@ type Engine struct {
 }
 
 // NewEngine creates a new block sending engine for the given block store
-func NewEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger, self peer.ID, compressionStrategy string) *Engine {
-	return newEngine(ctx, bs, peerTagger, self, maxBlockSizeReplaceHasWithBlock, nil, compressionStrategy)
+func NewEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger, self peer.ID) *Engine {
+	return newEngine(ctx, bs, peerTagger, self, maxBlockSizeReplaceHasWithBlock, nil)
 }
 
 // This constructor is used by the tests
 func newEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger, self peer.ID,
-	maxReplaceSize int, scoreLedger ScoreLedger, compressionStrategy string) *Engine {
+	maxReplaceSize int, scoreLedger ScoreLedger) *Engine {
 
 	e := &Engine{
 		ledgerMap:                       make(map[peer.ID]*ledger),
@@ -203,8 +203,7 @@ func newEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger,
 		peertaskqueue.TaskMerger(newTaskMerger()),
 		peertaskqueue.IgnoreFreezing(true))
 
-	// Current compressor GZip. This should be configurable.
-	e.compressor = compression.NewGzipCompressor(compressionStrategy)
+	// TODO: Current compressor GZip. This should be configurable.
 	return e
 }
 
@@ -242,6 +241,11 @@ func (e *Engine) startScoreLedger(px process.Process) {
 		<-ppx.Closing()
 		e.scoreLedger.Stop()
 	})
+}
+
+// InitializeCompressor with specific strategy.
+func (e *Engine) InitCompressor(compressionStrategy string) {
+	e.compressor = compression.NewGzipCompressor(compressionStrategy)
 }
 
 // Start up workers to handle requests from other nodes for the data on this node
@@ -406,7 +410,12 @@ func (e *Engine) nextEnvelope(ctx context.Context) (*Envelope, error) {
 			continue
 		}
 
-		// TODO: Compress full message here.
+		// If the "full" comrpession strategy enabled, compress the full message.
+		// TODO: For now gzip is always used for full. Additional strategies such as
+		// full-gzip and full-br (brotli) could be devised and configured here.
+		if e.compressor.Strategy() == "full" {
+			msg.SetCompression(pb.Message_Gzip)
+		}
 
 		log.Debugw("Bitswap engine -> msg", "local", e.self, "to", p, "blockCount", len(msg.Blocks()), "presenceCount", len(msg.BlockPresences()), "size", msg.Size())
 		return &Envelope{

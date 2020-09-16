@@ -114,7 +114,9 @@ func TestGetBlockFromPeerAfterPeerAnnounces(t *testing.T) {
 func TestDoesNotProvideWhenConfiguredNotTo(t *testing.T) {
 	net := tn.VirtualNetwork(mockrouting.NewServer(), delay.Fixed(kNetworkDelay))
 	block := blocks.NewBlock([]byte("block"))
-	bsOpts := []bitswap.Option{bitswap.ProvideEnabled(false), bitswap.ProviderSearchDelay(50 * time.Millisecond)}
+	bsOpts := []bitswap.Option{bitswap.ProvideEnabled(false),
+		bitswap.ProviderSearchDelay(50 * time.Millisecond),
+		bitswap.CompressionStrategy("blocks")}
 	ig := testinstance.NewTestInstanceGenerator(net, nil, bsOpts)
 	defer ig.Close()
 

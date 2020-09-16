@@ -66,7 +66,7 @@ var (
 	// "none": No compression used.
 	// "blocks": Only raw data of blocks is compressed,
 	// "full": Full message compressed.
-	compressionStrategy = "blocks"
+	defaultCompressionStrategy = "full"
 )
 
 // Option defines the functional option type that can be used to configure
@@ -91,6 +91,13 @@ func ProviderSearchDelay(newProvSearchDelay time.Duration) Option {
 func RebroadcastDelay(newRebroadcastDelay delay.D) Option {
 	return func(bs *Bitswap) {
 		bs.rebroadcastDelay = newRebroadcastDelay
+	}
+}
+
+// CompressionStrategy sets the compression for exchange interface
+func CompressionStrategy(compressionStrategy string) Option {
+	return func(bs *Bitswap) {
+		bs.compressionStrategy = compressionStrategy
 	}
 }
 
@@ -175,27 +182,28 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 	}
 	notif := notifications.New()
 	sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self())
-	engine := decision.NewEngine(ctx, bstore, network.ConnectionManager(), network.Self(), compressionStrategy)
+	engine := decision.NewEngine(ctx, bstore, network.ConnectionManager(), network.Self())
 
 	bs := &Bitswap{
-		blockstore:       bstore,
-		engine:           engine,
-		network:          network,
-		process:          px,
-		newBlocks:        make(chan cid.Cid, HasBlockBufferSize),
-		provideKeys:      make(chan cid.Cid, provideKeysBufferSize),
-		pm:               pm,
-		pqm:              pqm,
-		sm:               sm,
-		sim:              sim,
-		notif:            notif,
-		counters:         new(counters),
-		dupMetric:        dupHist,
-		allMetric:        allHist,
-		sentHistogram:    sentHistogram,
-		provideEnabled:   true,
-		provSearchDelay:  defaultProvSearchDelay,
-		rebroadcastDelay: delay.Fixed(time.Minute),
+		blockstore:          bstore,
+		engine:              engine,
+		network:             network,
+		process:             px,
+		newBlocks:           make(chan cid.Cid, HasBlockBufferSize),
+		provideKeys:         make(chan cid.Cid, provideKeysBufferSize),
+		pm:                  pm,
+		pqm:                 pqm,
+		sm:                  sm,
+		sim:                 sim,
+		notif:               notif,
+		counters:            new(counters),
+		dupMetric:           dupHist,
+		allMetric:           allHist,
+		sentHistogram:       sentHistogram,
+		provideEnabled:      true,
+		provSearchDelay:     defaultProvSearchDelay,
+		rebroadcastDelay:    delay.Fixed(time.Minute),
+		compressionStrategy: defaultCompressionStrategy,
 	}
 
 	// apply functional options before starting and running bitswap
@@ -205,6 +213,9 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 
 	bs.pqm.Startup()
 	network.SetDelegate(bs)
+
+	// Initialize compressor
+	engine.InitCompressor(bs.compressionStrategy)
 
 	// Start up bitswaps async worker routines
 	bs.startWorkers(ctx, px)
@@ -278,6 +289,9 @@ type Bitswap struct {
 
 	// how often to rebroadcast providing requests to find more optimized providers
 	rebroadcastDelay delay.D
+
+	// compression strategy to follow in exchange
+	compressionStrategy string
 }
 
 type counters struct {
@@ -434,6 +448,7 @@ func (bs *Bitswap) ReceiveMessage(ctx context.Context, p peer.ID, incoming bsmsg
 	bs.counterLk.Lock()
 	bs.counters.messagesRecvd++
 	// Track all the data receiveid (including control messages)
+	// If message compressed we need to change how this Size is computed.
 	bs.counters.dataRecvd += uint64(incoming.Size())
 	bs.counterLk.Unlock()
 
@@ -481,13 +496,13 @@ func (bs *Bitswap) ReceiveMessage(ctx context.Context, p peer.ID, incoming bsmsg
 	}(bs)
 
 	iblocks := incoming.Blocks()
-	// TODO: If only compressed blocks. Uncompress blocks here.
+	// If only compressed blocks. Uncompress blocks here.
 	if len(iblocks) > 0 {
 		bs.updateReceiveCounters(iblocks)
 
 		// If compression strategy blocks and there are blocks in the
 		// message, once stats are updated decompress the RawData.
-		if compressionStrategy == "blocks" {
+		if bs.compressionStrategy == "blocks" {
 			iblocks = bs.engine.Compressor().UncompressBlocks(iblocks)
 		}
 
