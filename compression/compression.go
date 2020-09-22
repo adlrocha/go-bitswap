@@ -5,8 +5,12 @@ import (
 	"compress/gzip"
 	"fmt"
 
+	logging "github.com/ipfs/go-log"
+
 	blocks "github.com/ipfs/go-block-format"
 )
+
+var log = logging.Logger("bitswap")
 
 // Compressor implements a comperssor interface.
 type Compressor interface {
@@ -14,6 +18,7 @@ type Compressor interface {
 	Compress([]byte) []byte
 	Uncompress([]byte) []byte
 	UncompressBlocks([]blocks.Block) []blocks.Block
+	CompressBlocks([]blocks.Block) []blocks.Block
 	Strategy() string
 }
 
@@ -29,6 +34,7 @@ func NewGzipCompressor(compressionStrategy string) Compressor {
 		// Be use BestCompression by default. But this is prepared
 		// to configure compressor with other options such as:
 		// gzip.BestSpeed.
+		// gzip.BestCompression
 		// Best trade-off results gzip.DefaultCompression
 		opts:                gzip.BestCompression,
 		compressionStrategy: compressionStrategy,
@@ -75,14 +81,19 @@ func (g *Gzip) Uncompress(in []byte) []byte {
 func (g *Gzip) UncompressBlocks(blks []blocks.Block) []blocks.Block {
 	for i, b := range blks {
 		uncompressedData := g.Uncompress(b.RawData())
-		blk, err := blocks.NewBlockWithCid(uncompressedData, b.Cid())
-		// Do not assign compressed data if the node fails.
-		// TODO: This is potentially dangerous and nemust be fixed
-		// with a compression flag as it can lead to some blocks being
-		// compressed and other not, and not being able to identify this.
-		if err == nil {
-			blks[i] = blk
-		}
+		blk, _ := blocks.NewBlockWithCid(uncompressedData, b.Cid())
+		blks[i] = blk
+	}
+	return blks
+}
+
+// CompressBlocks uncompresses a list of blocks.
+func (g *Gzip) CompressBlocks(blks []blocks.Block) []blocks.Block {
+	for i, b := range blks {
+		compressedData := g.Compress(b.RawData())
+		blk, _ := blocks.NewBlockWithCid(compressedData, b.Cid())
+		blks[i] = blk
+
 	}
 	return blks
 }

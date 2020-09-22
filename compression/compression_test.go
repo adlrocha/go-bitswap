@@ -29,23 +29,19 @@ func TestCompressBlocks(t *testing.T) {
 
 	// Compress an uncompress list of blocks
 	c := NewGzipCompressor(compressionStrategy)
-	var err error
 
 	blks := []blocks.Block{blocks.NewBlock([]byte("block1")),
 		blocks.NewBlock([]byte("block2")),
-	}
-	compBlks := make([]blocks.Block, len(blks))
-	for i, b := range blks {
-		compData := c.Compress(b.RawData())
-		compBlks[i], err = blocks.NewBlockWithCid(compData, b.Cid())
-		if err != nil {
-			t.Fatal(err)
-		}
+		blocks.NewBlock([]byte("block3")),
+		blocks.NewBlock([]byte("foo")),
+		blocks.NewBlock([]byte("barxx")),
 	}
 
-	unblks := c.(*Gzip).UncompressBlocks(compBlks)
+	compBlks := c.CompressBlocks(blks)
+	unblks := c.UncompressBlocks(compBlks)
 	for i, b := range unblks {
-		if string(blks[i].RawData()) != string(b.RawData()) {
+		if string(blks[i].RawData()) != string(b.RawData()) ||
+			len(blks[i].RawData()) != len(b.RawData()) {
 			t.Fatalf("Uncompression of blocks failed")
 
 		}

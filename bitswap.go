@@ -66,7 +66,7 @@ var (
 	// "none": No compression used.
 	// "blocks": Only raw data of blocks is compressed,
 	// "full": Full message compressed.
-	defaultCompressionStrategy = "full"
+	defaultCompressionStrategy = "blocks"
 )
 
 // Option defines the functional option type that can be used to configure
@@ -373,7 +373,7 @@ func (bs *Bitswap) receiveBlocksFrom(ctx context.Context, from peer.ID, blks []b
 		var notWanted []blocks.Block
 		wanted, notWanted = bs.sim.SplitWantedUnwanted(blks)
 		for _, b := range notWanted {
-			log.Debugf("[recv] block not in wantlist; cid=%s, peer=%s", b.Cid(), from)
+			log.Debugf("[recv] block not in wantlist; cid=%s, peer=%s, size=%d", b.Cid(), from, len(b.RawData()))
 		}
 	}
 
@@ -452,8 +452,6 @@ func (bs *Bitswap) ReceiveMessage(ctx context.Context, p peer.ID, incoming bsmsg
 	bs.counters.dataRecvd += uint64(incoming.Size())
 	bs.counterLk.Unlock()
 
-	// TODO: Uncompress message.
-
 	// This call records changes to wantlists, blocks received,
 	// and number of bytes transfered.
 	bs.engine.MessageReceived(ctx, p, incoming)
@@ -496,18 +494,11 @@ func (bs *Bitswap) ReceiveMessage(ctx context.Context, p peer.ID, incoming bsmsg
 	}(bs)
 
 	iblocks := incoming.Blocks()
-	// If only compressed blocks. Uncompress blocks here.
 	if len(iblocks) > 0 {
 		bs.updateReceiveCounters(iblocks)
 
-		// If compression strategy blocks and there are blocks in the
-		// message, once stats are updated decompress the RawData.
-		if bs.compressionStrategy == "blocks" {
-			iblocks = bs.engine.Compressor().UncompressBlocks(iblocks)
-		}
-
 		for _, b := range iblocks {
-			log.Debugf("[recv] block; cid=%s, peer=%s", b.Cid(), p)
+			log.Debugf("[recv] block; cid=%s, peer=%s, size=%d", b.Cid(), p, len(b.RawData()))
 		}
 	}
 

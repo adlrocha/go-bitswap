@@ -39,8 +39,9 @@ message Message {
   }
 
   enum CompressionType {
-    None = 0;
-    Gzip = 1;
+    None = 0; // No compression used
+    Gzip = 1; // Full message compressed with GZip
+    BlockCompression = 2; // Only blocks compressed with GZip
   }
 
   Wantlist wantlist = 1 [(gogoproto.nullable) = false];

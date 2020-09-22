@@ -389,17 +389,6 @@ func (e *Engine) nextEnvelope(ctx context.Context) (*Envelope, error) {
 			} else {
 				// Add the block to the message
 				// log.Debugf("  make evlp %s->%s block: %s (%d bytes)", e.self, p, c, len(blk.RawData()))
-
-				// If the "blocks" compression strategy enabled. We compress
-				// the RawData of the block keeping the CID of the original content
-				// so what we are identifying is the original content.
-				if e.compressor.Strategy() == "blocks" {
-					compressedData := e.compressor.Compress(blk.RawData())
-					blk, err = blocks.NewBlockWithCid(compressedData, blk.Cid())
-					if err != nil {
-						return nil, err
-					}
-				}
 				msg.AddBlock(blk)
 			}
 		}
@@ -415,6 +404,8 @@ func (e *Engine) nextEnvelope(ctx context.Context) (*Envelope, error) {
 		// full-gzip and full-br (brotli) could be devised and configured here.
 		if e.compressor.Strategy() == "full" {
 			msg.SetCompression(pb.Message_Gzip)
+		} else if e.compressor.Strategy() == "blocks" {
+			msg.SetCompression(pb.Message_BlockCompression)
 		}
 
 		log.Debugw("Bitswap engine -> msg", "local", e.self, "to", p, "blockCount", len(msg.Blocks()), "presenceCount", len(msg.BlockPresences()), "size", msg.Size())

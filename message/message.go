@@ -11,6 +11,7 @@ import (
 
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
+	logging "github.com/ipfs/go-log"
 	pool "github.com/libp2p/go-buffer-pool"
 	msgio "github.com/libp2p/go-msgio"
 
@@ -18,6 +19,8 @@ import (
 	u "github.com/ipfs/go-ipfs-util"
 	"github.com/libp2p/go-libp2p-core/network"
 )
+
+var log = logging.Logger("bitswap")
 
 // BitSwapMessage is the basic interface for interacting building, encoding,
 // and decoding messages sent on the BitSwap protocol.
@@ -193,6 +196,7 @@ func (m *impl) Clone() BitSwapMessage {
 		msg.blockPresences[k] = m.blockPresences[k]
 	}
 	msg.pendingBytes = m.pendingBytes
+	msg.compression = m.compression
 	return msg
 }
 
@@ -215,8 +219,9 @@ func (m *impl) Reset(full bool) {
 var errCidMissing = errors.New("missing cid")
 
 func newMessageFromProto(pbm pb.Message) (BitSwapMessage, error) {
-	// Check if the message is compressed and uncompress.
-	if pbm.Compression != pb.Message_None {
+
+	// Check if the message is fully compressed and uncompress.
+	if pbm.Compression == pb.Message_Gzip {
 		unpbm, err := uncompressMsg(&pbm)
 		if err != nil {
 			return nil, fmt.Errorf("Error uncompressing message: %w", err)
@@ -237,6 +242,15 @@ func newMessageFromProto(pbm pb.Message) (BitSwapMessage, error) {
 
 	// deprecated
 	for _, d := range pbm.Blocks {
+		// In V0 only RawData is sent in blocks so we uncompress rawData and
+		// regenerate the CID with newBlock.
+		if pbm.Compression == pb.Message_BlockCompression {
+
+			// Initialize compressor.
+			compressor := intializeCompressor(pb.Message_BlockCompression)
+			//Uncompress compressed payload.
+			d = compressor.Uncompress(d)
+		}
 		// CIDv0, sha256, protobuf only
 		b := blocks.NewBlock(d)
 		m.AddBlock(b)
@@ -249,14 +263,36 @@ func newMessageFromProto(pbm pb.Message) (BitSwapMessage, error) {
 			return nil, err
 		}
 
-		c, err := pref.Sum(b.GetData())
-		if err != nil {
-			return nil, err
-		}
+		var c cid.Cid
+		var blk *blocks.BasicBlock
 
-		blk, err := blocks.NewBlockWithCid(b.GetData(), c)
-		if err != nil {
-			return nil, err
+		// If blocks compressed we need to regenerate CID from
+		if pbm.Compression == pb.Message_BlockCompression {
+			// Initialize compressor.
+			compressor := intializeCompressor(pb.Message_BlockCompression)
+			// Uncompress compressed payload.
+			d := compressor.Uncompress(b.GetData())
+			// Generate CID from uncompressed data.
+			c, err = pref.Sum(d)
+			if err != nil {
+				return nil, err
+			}
+			// Add the block already uncompressed for processing.
+			blk, err = blocks.NewBlockWithCid(d, c)
+			if err != nil {
+				return nil, err
+			}
+			log.Debugf("[protobuf] Receiving block in message: CID=%v; len=%v", blk.Cid(), len(blk.RawData()))
+		} else {
+			c, err = pref.Sum(b.GetData())
+			if err != nil {
+				return nil, err
+			}
+			blk, err = blocks.NewBlockWithCid(b.GetData(), c)
+			if err != nil {
+				return nil, err
+			}
+
 		}
 
 		m.AddBlock(blk)
@@ -406,7 +442,8 @@ func (m *impl) Size() int {
 
 	// TODO: This should be removed as it adds
 	// a significant overhead to compress every time.
-	if m.compression != pb.Message_None {
+	// TODO: Update to account for the compression of blocks.
+	if m.compression != pb.Message_None && m.compression != pb.Message_BlockCompression {
 		pbm := m.ToProtoV1()
 		return pbm.Size()
 	}
@@ -457,10 +494,13 @@ func FromMsgReader(r msgio.Reader) (BitSwapMessage, error) {
 func intializeCompressor(compressionType pb.Message_CompressionType) compression.Compressor {
 	var compressor compression.Compressor
 
-	// For now we always use Gzip until we have other comrpession algorithms.
+	// For now we always use Gzip until we have other compression algorithms.
+	// This needs to be enhanced.
 	switch compressionType {
 	case pb.Message_Gzip:
 		compressor = compression.NewGzipCompressor("full")
+	case pb.Message_BlockCompression:
+		compressor = compression.NewGzipCompressor("blocks")
 	default:
 		compressor = compression.NewGzipCompressor("full")
 	}
@@ -473,7 +513,11 @@ func compressMsg(in *pb.Message, compressionType pb.Message_CompressionType) *pb
 	// Initialize compressor.
 	compressor := intializeCompressor(compressionType)
 
-	marshIn, _ := in.Marshal()
+	marshIn, err := in.Marshal()
+	if err != nil {
+		log.Debugf("Error marshalling compressed message: %s", err)
+	}
+
 	// Generate compressed payload.
 	payload := compressor.Compress(marshIn)
 	pbm := new(pb.Message)
@@ -490,7 +534,6 @@ func uncompressMsg(in *pb.Message) (*pb.Message, error) {
 
 	//Uncompress compressed payload.
 	uncompPayload := compressor.Uncompress(in.CompressedPayload)
-
 	// Unmarshal into pb message
 	var pbm pb.Message
 	err := pbm.Unmarshal(uncompPayload)
@@ -502,6 +545,14 @@ func uncompressMsg(in *pb.Message) (*pb.Message, error) {
 
 }
 
+func (m *impl) ifBlockCompressionCompress(blks []blocks.Block) []blocks.Block {
+	if m.compression == pb.Message_BlockCompression {
+		compressor := intializeCompressor(pb.Message_BlockCompression)
+		blks = compressor.CompressBlocks(blks)
+	}
+	return blks
+}
+
 func (m *impl) ToProtoV0() *pb.Message {
 	pbm := new(pb.Message)
 	pbm.Wantlist.Entries = make([]pb.Message_Wantlist_Entry, 0, len(m.wantlist))
@@ -511,13 +562,18 @@ func (m *impl) ToProtoV0() *pb.Message {
 	pbm.Wantlist.Full = m.full
 
 	blocks := m.Blocks()
+	blocks = m.ifBlockCompressionCompress(blocks)
+
 	pbm.Blocks = make([][]byte, 0, len(blocks))
 	for _, b := range blocks {
 		pbm.Blocks = append(pbm.Blocks, b.RawData())
 	}
+
 	// If compression enabled, compress the full message and create new compressed message.
 	// Compression in Payload and that's it.
-	if m.compression != pb.Message_None {
+	if m.compression == pb.Message_BlockCompression {
+		pbm.Compression = pb.Message_BlockCompression
+	} else if m.compression != pb.Message_None {
 		pbm = compressMsg(pbm, m.compression)
 	}
 
@@ -533,12 +589,14 @@ func (m *impl) ToProtoV1() *pb.Message {
 	pbm.Wantlist.Full = m.full
 
 	blocks := m.Blocks()
+	blocks = m.ifBlockCompressionCompress(blocks)
 	pbm.Payload = make([]pb.Message_Block, 0, len(blocks))
 	for _, b := range blocks {
 		pbm.Payload = append(pbm.Payload, pb.Message_Block{
-			Data:   b.RawData(),
-			Prefix: b.Cid().Prefix().Bytes(),
+			Data:   b.RawData(),              // Compessed data
+			Prefix: b.Cid().Prefix().Bytes(), // CID uncompressed
 		})
+		log.Debugf("[protobuf] Sending block in message: CID=%v; len=%v", b.Cid(), len(b.RawData()))
 	}
 
 	pbm.BlockPresences = make([]pb.Message_BlockPresence, 0, len(m.blockPresences))
@@ -553,7 +611,9 @@ func (m *impl) ToProtoV1() *pb.Message {
 
 	// If compression enabled, compress the full message and create new compressed message.
 	// Compression in Payload and that's it.
-	if m.compression != pb.Message_None {
+	if m.compression == pb.Message_BlockCompression {
+		pbm.Compression = pb.Message_BlockCompression
+	} else if m.compression != pb.Message_None {
 		pbm = compressMsg(pbm, m.compression)
 	}
 
