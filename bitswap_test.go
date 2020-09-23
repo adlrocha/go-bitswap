@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/rand"
 	"sync"
 	"testing"
 	"time"
@@ -28,6 +29,14 @@ import (
 	p2ptestutil "github.com/libp2p/go-libp2p-netutil"
 	travis "github.com/libp2p/go-libp2p-testing/ci/travis"
 	tu "github.com/libp2p/go-libp2p-testing/etc"
+
+	bsnet "github.com/ipfs/go-bitswap/network"
+	ds "github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore/delayed"
+	ds_sync "github.com/ipfs/go-datastore/sync"
+	nilrouting "github.com/ipfs/go-ipfs-routing/none"
+	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p-core/host"
 )
 
 // FIXME the tests are really sensitive to the network delay. fix them to work
@@ -1005,4 +1014,151 @@ func TestWireTap(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// TESTING BITSWAP WITH REAL NETWORK AND NOT A VIRTUAL ONE.
+
+func CreateBlockstore(ctx context.Context, bstoreDelay time.Duration) (blockstore.Blockstore, error) {
+	bsdelay := delay.Fixed(bstoreDelay)
+	dstore := ds_sync.MutexWrap(delayed.New(ds.NewMapDatastore(), bsdelay))
+	return blockstore.CachedBlockstore(ctx,
+		blockstore.NewBlockstore(ds_sync.MutexWrap(dstore)),
+		blockstore.DefaultCacheOpts())
+}
+
+// GenerateBlocksOfSize generates a series of blocks of the given byte size
+func GenerateBlocksOfSize(n int, size int64) []blocks.Block {
+	generatedBlocks := make([]blocks.Block, 0, n)
+	for i := 0; i < n; i++ {
+		// rand.Read never errors
+		buf := make([]byte, size)
+		rand.Read(buf)
+		b := blocks.NewBlock(buf)
+		generatedBlocks = append(generatedBlocks, b)
+
+	}
+	return generatedBlocks
+}
+
+func CreateBitswapNode(ctx context.Context, h host.Host, opts []bitswap.Option) (*bitswap.Bitswap, error) {
+	bstore, err := CreateBlockstore(ctx, 4000)
+	if err != nil {
+		return nil, err
+	}
+	routing, err := nilrouting.ConstructNilRouting(ctx, nil, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	net := bsnet.NewFromIpfsHost(h, routing)
+	return bitswap.New(ctx, net, bstore, opts...).(*bitswap.Bitswap), nil
+}
+
+func TestCompressionOption(t *testing.T) {
+	bsOpts := []bitswap.Option{bitswap.ProvideEnabled(false),
+		bitswap.ProviderSearchDelay(50 * time.Millisecond),
+		bitswap.CompressionStrategy("full")}
+	ctx := context.Background()
+	h1, _ := libp2p.New(ctx)
+	node, _ := CreateBitswapNode(ctx, h1, bsOpts)
+	if node.Compressor().Strategy() != "full" {
+		t.Fatalf("Wrong strategy configured: full v.s. %s", node.Compressor().Strategy())
+	}
+
+	bsOpts = []bitswap.Option{
+		bitswap.CompressionStrategy("block")}
+	node, _ = CreateBitswapNode(ctx, h1, bsOpts)
+	if node.Compressor().Strategy() != "block" {
+		t.Fatalf("Wrong strategy configured: block v.s. %s", node.Compressor().Strategy())
+	}
+
+}
+
+func TestRealNetBlockCompression(t *testing.T) {
+	bsOpts := []bitswap.Option{
+		bitswap.CompressionStrategy("blocks")}
+	ctx := context.Background()
+	h1, _ := libp2p.New(ctx)
+	h2, _ := libp2p.New(ctx)
+	node1, _ := CreateBitswapNode(ctx, h1, bsOpts)
+	node2, _ := CreateBitswapNode(ctx, h2, bsOpts)
+
+	// Connect peers
+	if err := h1.Connect(ctx, *host.InfoFromHost(h2)); err != nil {
+		t.Fatalf("Error dialing peers")
+	}
+
+	instances := []*bitswap.Bitswap{node1, node2}
+	// bg := blocksutil.NewBlockGenerator()
+	// blks := bg.Blocks(1)
+	blks := GenerateBlocksOfSize(1, 1234567)
+
+	// First peer has block
+	err := instances[0].HasBlock(blks[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
+	// Second peer broadcasts want for block CID
+	// (Received by first and third peers)
+	blk, err := instances[1].GetBlock(ctx, blks[0].Cid())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(blk.RawData(), blks[0].RawData()) {
+		t.Errorf("blocks aren't equal: expected %v, actual %v", blks[0].RawData(), blk.RawData())
+	}
+
+	t.Log(blk)
+	h1.Close()
+	h2.Close()
+}
+
+func TestRealNetFullCompression(t *testing.T) {
+	bsOpts := []bitswap.Option{
+		bitswap.CompressionStrategy("full")}
+	ctx := context.Background()
+	h1, _ := libp2p.New(ctx)
+	h2, _ := libp2p.New(ctx)
+	node1, _ := CreateBitswapNode(ctx, h1, bsOpts)
+	node2, _ := CreateBitswapNode(ctx, h2, bsOpts)
+
+	t.Logf("Compression used: %v", node1.Compressor().Strategy())
+
+	// Connect peers
+	if err := h1.Connect(ctx, *host.InfoFromHost(h2)); err != nil {
+		t.Fatalf("Error dialing peers")
+	}
+
+	instances := []*bitswap.Bitswap{node1, node2}
+	// bg := blocksutil.NewBlockGenerator()
+	// blks := bg.Blocks(1)
+	blks := GenerateBlocksOfSize(1, 1234567)
+
+	// First peer has block
+	err := instances[0].HasBlock(blks[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
+	// Second peer broadcasts want for block CID
+	// (Received by first and third peers)
+	blk, err := instances[1].GetBlock(ctx, blks[0].Cid())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(blk.RawData(), blks[0].RawData()) {
+		t.Errorf("blocks aren't equal: expected %v, actual %v", blks[0].RawData(), blk.RawData())
+	}
+
+	t.Log(blk)
+	h1.Close()
+	h2.Close()
 }

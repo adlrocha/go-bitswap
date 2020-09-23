@@ -2,6 +2,7 @@ package compression
 
 import (
 	"compress/gzip"
+	"crypto/rand"
 	"testing"
 
 	blocks "github.com/ipfs/go-block-format"
@@ -16,8 +17,10 @@ func TestGzip(t *testing.T) {
 		t.Fatalf("GZip was not implemented")
 	}
 
-	// Compress random string
-	s := []byte("This is a test")
+	// Compress random bytes
+	blks := GenerateBlocksOfSize(1, 1234567)
+	s := blks[0].RawData()
+
 	comp := c.Compress(s)
 	uncomp := c.Uncompress(comp)
 	if string(uncomp) != string(s) && len(uncomp) == len(s) {
@@ -30,12 +33,7 @@ func TestCompressBlocks(t *testing.T) {
 	// Compress an uncompress list of blocks
 	c := NewGzipCompressor(compressionStrategy)
 
-	blks := []blocks.Block{blocks.NewBlock([]byte("block1")),
-		blocks.NewBlock([]byte("block2")),
-		blocks.NewBlock([]byte("block3")),
-		blocks.NewBlock([]byte("foo")),
-		blocks.NewBlock([]byte("barxx")),
-	}
+	blks := GenerateBlocksOfSize(5, 1234567)
 
 	compBlks := c.CompressBlocks(blks)
 	unblks := c.UncompressBlocks(compBlks)
@@ -46,4 +44,18 @@ func TestCompressBlocks(t *testing.T) {
 
 		}
 	}
+}
+
+// GenerateBlocksOfSize to generate larger blocks.
+func GenerateBlocksOfSize(n int, size int64) []blocks.Block {
+	generatedBlocks := make([]blocks.Block, 0, n)
+	for i := 0; i < n; i++ {
+		// rand.Read never errors
+		buf := make([]byte, size)
+		rand.Read(buf)
+		b := blocks.NewBlock(buf)
+		generatedBlocks = append(generatedBlocks, b)
+
+	}
+	return generatedBlocks
 }

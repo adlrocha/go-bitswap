@@ -66,7 +66,7 @@ var (
 	// "none": No compression used.
 	// "blocks": Only raw data of blocks is compressed,
 	// "full": Full message compressed.
-	defaultCompressionStrategy = "blocks"
+	defaultCompressionStrategy = "full"
 )
 
 // Option defines the functional option type that can be used to configure
@@ -95,9 +95,9 @@ func RebroadcastDelay(newRebroadcastDelay delay.D) Option {
 }
 
 // CompressionStrategy sets the compression for exchange interface
-func CompressionStrategy(compressionStrategy string) Option {
+func CompressionStrategy(newCompressionStrategy string) Option {
 	return func(bs *Bitswap) {
-		bs.compressionStrategy = compressionStrategy
+		bs.compressionStrategy = newCompressionStrategy
 	}
 }
 

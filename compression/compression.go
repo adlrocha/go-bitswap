@@ -3,7 +3,7 @@ package compression
 import (
 	"bytes"
 	"compress/gzip"
-	"fmt"
+	"io"
 
 	logging "github.com/ipfs/go-log"
 
@@ -70,9 +70,16 @@ func (g *Gzip) Uncompress(in []byte) []byte {
 	out := make([]byte, 2*inBuf.Len())
 	r, err := gzip.NewReader(inBuf)
 	if err != nil {
-		fmt.Println(err)
+		log.Debugf("[ERROR] Error uncompressing data!! %w", err)
 	}
-	count, _ := r.Read(out)
+
+	// Careful! If we don't read the full reader the compression
+	// reader optimizes to be fast and only sends the first chunk
+	// of 32768 compressed.
+	count, err := io.ReadFull(r, out)
+	if err != nil {
+		log.Debugf("[ERROR] Error uncompressing data!! %w", err)
+	}
 	// Remove trailing zeroes
 	return out[:count]
 }

@@ -219,7 +219,7 @@ func (m *impl) Reset(full bool) {
 var errCidMissing = errors.New("missing cid")
 
 func newMessageFromProto(pbm pb.Message) (BitSwapMessage, error) {
-
+	log.Debugf("[protobuf] Size of full message received: %d", pbm.Size())
 	// Check if the message is fully compressed and uncompress.
 	if pbm.Compression == pb.Message_Gzip {
 		unpbm, err := uncompressMsg(&pbm)
@@ -282,7 +282,7 @@ func newMessageFromProto(pbm pb.Message) (BitSwapMessage, error) {
 			if err != nil {
 				return nil, err
 			}
-			log.Debugf("[protobuf] Receiving block in message: CID=%v; len=%v", blk.Cid(), len(blk.RawData()))
+			log.Debugf("[protobuf] Receiving block in message uncompressed: CID=%v; len=%v", blk.Cid(), len(blk.RawData()))
 		} else {
 			c, err = pref.Sum(b.GetData())
 			if err != nil {
@@ -596,7 +596,7 @@ func (m *impl) ToProtoV1() *pb.Message {
 			Data:   b.RawData(),              // Compessed data
 			Prefix: b.Cid().Prefix().Bytes(), // CID uncompressed
 		})
-		log.Debugf("[protobuf] Sending block in message: CID=%v; len=%v", b.Cid(), len(b.RawData()))
+		log.Debugf("[protobuf] Sending block in message compressed: CID=%v; len=%v", b.Cid(), len(b.RawData()))
 	}
 
 	pbm.BlockPresences = make([]pb.Message_BlockPresence, 0, len(m.blockPresences))
@@ -617,6 +617,7 @@ func (m *impl) ToProtoV1() *pb.Message {
 		pbm = compressMsg(pbm, m.compression)
 	}
 
+	log.Debugf("[protobuf] Size of full message sent: %d", pbm.Size())
 	return pbm
 }
 
