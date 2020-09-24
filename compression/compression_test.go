@@ -3,6 +3,7 @@ package compression
 import (
 	"compress/gzip"
 	"crypto/rand"
+	"fmt"
 	"testing"
 
 	blocks "github.com/ipfs/go-block-format"
@@ -13,6 +14,9 @@ var compressionStrategy = "blocks"
 func TestGzip(t *testing.T) {
 	// Initialize GZip compressor
 	c := NewGzipCompressor(compressionStrategy)
+	if CompressionPool == nil {
+		t.Fatalf("CompressionPool not initialized succesfully")
+	}
 	if c.(*Gzip).opts != gzip.BestCompression || c.Strategy() != compressionStrategy {
 		t.Fatalf("GZip was not implemented")
 	}
@@ -24,13 +28,14 @@ func TestGzip(t *testing.T) {
 	comp := c.Compress(s)
 	uncomp := c.Uncompress(comp)
 	if string(uncomp) != string(s) && len(uncomp) == len(s) {
-		t.Fatalf("Gzip compression and uncompression unsuccessful: %s, %s", string(s), string(uncomp))
+		fmt.Println(uncomp, s)
+		t.Fatalf("Gzip compression and uncompress unsuccessful: %d, %d", len(s), len(uncomp))
 	}
 }
 
 func TestCompressBlocks(t *testing.T) {
 
-	// Compress an uncompress list of blocks
+	// Compress and uncompress list of blocks
 	c := NewGzipCompressor(compressionStrategy)
 
 	blks := GenerateBlocksOfSize(5, 1234567)

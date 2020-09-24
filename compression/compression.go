@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
+	"sync"
 
 	logging "github.com/ipfs/go-log"
 
@@ -11,6 +12,9 @@ import (
 )
 
 var log = logging.Logger("bitswap")
+
+// CompressionPool stores the compression buffers
+var CompressionPool *sync.Pool
 
 // Compressor implements a comperssor interface.
 type Compressor interface {
@@ -30,13 +34,28 @@ type Gzip struct {
 
 // NewGzipCompressor intialize a new GZip compressor.
 func NewGzipCompressor(compressionStrategy string) Compressor {
+	// We use BestCompression by default. But this is prepared
+	// to configure compressor with other options such as:
+	// gzip.BestSpeed.
+	// gzip.BestCompression
+	// Best trade-off results gzip.DefaultCompression
+	compressionLevel := gzip.BestCompression
+
+	// Initialize the pool if it hasn't been initialized.
+	if CompressionPool == nil {
+		CompressionPool = &sync.Pool{
+			New: func() interface{} {
+				// NewWriterLevel only returns error on a bad level, we are guaranteeing
+				// that this will be a valid level so it is okay to ignore the returned
+				// error.
+				w, _ := gzip.NewWriterLevel(nil, compressionLevel)
+				return w
+			},
+		}
+	}
+	// Return compressor descriptor.
 	return &Gzip{
-		// Be use BestCompression by default. But this is prepared
-		// to configure compressor with other options such as:
-		// gzip.BestSpeed.
-		// gzip.BestCompression
-		// Best trade-off results gzip.DefaultCompression
-		opts:                gzip.BestCompression,
+		opts:                compressionLevel,
 		compressionStrategy: compressionStrategy,
 	}
 }
@@ -54,12 +73,15 @@ func (g *Gzip) Type() string {
 // Compress bytes with GZip
 func (g *Gzip) Compress(in []byte) []byte {
 	var out bytes.Buffer
+	w := CompressionPool.Get().(*gzip.Writer)
 	// If we don't use the default level for gzip we should get
 	// this error to detect if gzip compressor was configured with
 	// a wrong level.
-	w, _ := gzip.NewWriterLevel(&out, g.opts)
+	// w, _ := gzip.NewWriterLevel(&out, g.opts)
+	w.Reset(&out)
 	w.Write(in)
 	w.Close()
+	CompressionPool.Put(w)
 	return out.Bytes()
 }
 
@@ -80,6 +102,8 @@ func (g *Gzip) Uncompress(in []byte) []byte {
 	if err != nil {
 		log.Debugf("[ERROR] Error uncompressing data!! %w", err)
 	}
+	r.Close()
+
 	// Remove trailing zeroes
 	return out[:count]
 }

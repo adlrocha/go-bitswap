@@ -2,6 +2,7 @@ package message
 
 import (
 	"bytes"
+	"crypto/rand"
 	"testing"
 
 	pb "github.com/ipfs/go-bitswap/message/pb"
@@ -444,4 +445,67 @@ func TestCompressedBlocks(t *testing.T) {
 			t.Fail()
 		}
 	}
+}
+
+func TestBenchmarkCompression(t *testing.T) {
+	// Choose num of blocks and iteration for test
+	numBlocks := 10
+	iters := 500
+	useComp := pb.Message_Gzip
+
+	// Testing using net and V1
+	original := New(true)
+	original.AddEntry(mkFakeCid("M"), 1, pb.Message_Wantlist_Block, true)
+	original.AddEntry(mkFakeCid("B"), 1, pb.Message_Wantlist_Block, true)
+	original.AddEntry(mkFakeCid("D"), 1, pb.Message_Wantlist_Block, true)
+	original.AddEntry(mkFakeCid("T"), 1, pb.Message_Wantlist_Block, true)
+	original.AddEntry(mkFakeCid("F"), 1, pb.Message_Wantlist_Block, true)
+
+	blks := GenerateBlocksOfSize(numBlocks, 123456)
+	for _, b := range blks {
+		original.AddBlock(b)
+	}
+
+	original.SetCompression(useComp)
+
+	for i := 0; i < iters; i++ {
+		buf := new(bytes.Buffer)
+		if err := original.ToNetV1(buf); err != nil {
+			t.Fatal(err)
+		}
+
+		m2, err := FromNet(buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if m2.HasCompression() != useComp {
+			t.Fatalf("Wrong resulting compression in message: %s", m2.HasCompression())
+		}
+
+		keys := make(map[cid.Cid]bool)
+		for _, b := range m2.Blocks() {
+			keys[b.Cid()] = true
+		}
+
+		for _, b := range original.Blocks() {
+			if _, ok := keys[b.Cid()]; !ok {
+				t.Fail()
+			}
+		}
+	}
+}
+
+// GenerateBlocksOfSize to generate larger blocks.
+func GenerateBlocksOfSize(n int, size int64) []blocks.Block {
+	generatedBlocks := make([]blocks.Block, 0, n)
+	for i := 0; i < n; i++ {
+		// rand.Read never errors
+		buf := make([]byte, size)
+		rand.Read(buf)
+		b := blocks.NewBlock(buf)
+		generatedBlocks = append(generatedBlocks, b)
+
+	}
+	return generatedBlocks
 }
