@@ -433,9 +433,9 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 		for _, et := range entries {
 			if !et.Cancel {
 				if et.WantType == pb.Message_Wantlist_Have {
-					log.Debugw("Bitswap engine <- want-have", "local", e.self, "from", p, "cid", et.Cid)
+					log.Debugw("Bitswap engine <- want-have", "local", e.self, "from", p, "cid", et.Cid, "ttl", et.TTL)
 				} else {
-					log.Debugw("Bitswap engine <- want-block", "local", e.self, "from", p, "cid", et.Cid)
+					log.Debugw("Bitswap engine <- want-block", "local", e.self, "from", p, "cid", et.Cid, "ttl", et.TTL)
 				}
 			}
 		}
@@ -490,31 +490,38 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 		blockSize, found := blockSizes[entry.Cid]
 
 		// Add each want-have / want-block to the ledger
-		l.Wants(c, entry.Priority, entry.WantType)
+		l.Wants(c, entry.Priority, entry.WantType, entry.TTL)
 
 		// If the block was not found
 		if !found {
 			log.Debugw("Bitswap engine: block not found", "local", e.self, "from", p, "cid", entry.Cid, "sendDontHave", entry.SendDontHave)
 
-			// Only add the task to the queue if the requester wants a DONT_HAVE
-			if e.sendDontHaves && entry.SendDontHave {
-				newWorkExists = true
-				isWantBlock := false
-				if entry.WantType == pb.Message_Wantlist_Block {
-					isWantBlock = true
-				}
+			if entry.TTL != 0 {
+				// TODO: If we don't find the block and there is still TTL
+				// we start an indirect sesion, i.e. I start a new session and send
+				// want messages to all my connected peers with TTL=entry.TTL - 1
 
-				activeEntries = append(activeEntries, peertask.Task{
-					Topic:    c,
-					Priority: int(entry.Priority),
-					Work:     bsmsg.BlockPresenceSize(c),
-					Data: &taskData{
-						BlockSize:    0,
-						HaveBlock:    false,
-						IsWantBlock:  isWantBlock,
-						SendDontHave: entry.SendDontHave,
-					},
-				})
+			} else {
+				// Only add the task to the queue if the requester wants a DONT_HAVE
+				if e.sendDontHaves && entry.SendDontHave {
+					newWorkExists = true
+					isWantBlock := false
+					if entry.WantType == pb.Message_Wantlist_Block {
+						isWantBlock = true
+					}
+
+					activeEntries = append(activeEntries, peertask.Task{
+						Topic:    c,
+						Priority: int(entry.Priority),
+						Work:     bsmsg.BlockPresenceSize(c),
+						Data: &taskData{
+							BlockSize:    0,
+							HaveBlock:    false,
+							IsWantBlock:  isWantBlock,
+							SendDontHave: entry.SendDontHave,
+						},
+					})
+				}
 			}
 		} else {
 			// The block was found, add it to the queue

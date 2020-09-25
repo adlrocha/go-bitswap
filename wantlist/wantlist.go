@@ -20,14 +20,16 @@ type Entry struct {
 	Cid      cid.Cid
 	Priority int32
 	WantType pb.Message_Wantlist_WantType
+	TTL      int32
 }
 
 // NewRefEntry creates a new reference tracked wantlist entry.
-func NewRefEntry(c cid.Cid, p int32) Entry {
+func NewRefEntry(c cid.Cid, p int32, ttl int32) Entry {
 	return Entry{
 		Cid:      c,
 		Priority: p,
 		WantType: pb.Message_Wantlist_Block,
+		TTL:      ttl,
 	}
 }
 
@@ -50,7 +52,7 @@ func (w *Wantlist) Len() int {
 }
 
 // Add adds an entry in a wantlist from CID & Priority, if not already present.
-func (w *Wantlist) Add(c cid.Cid, priority int32, wantType pb.Message_Wantlist_WantType) bool {
+func (w *Wantlist) Add(c cid.Cid, priority int32, wantType pb.Message_Wantlist_WantType, ttl int32) bool {
 	e, ok := w.set[c]
 
 	// Adding want-have should not override want-block
@@ -62,6 +64,7 @@ func (w *Wantlist) Add(c cid.Cid, priority int32, wantType pb.Message_Wantlist_W
 		Cid:      c,
 		Priority: priority,
 		WantType: wantType,
+		TTL:      ttl,
 	}
 
 	return true
@@ -114,7 +117,7 @@ func (w *Wantlist) Entries() []Entry {
 // Absorb all the entries in other into this want list
 func (w *Wantlist) Absorb(other *Wantlist) {
 	for _, e := range other.Entries() {
-		w.Add(e.Cid, e.Priority, e.WantType)
+		w.Add(e.Cid, e.Priority, e.WantType, e.TTL)
 	}
 }
 

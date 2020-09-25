@@ -38,7 +38,7 @@ type BitSwapMessage interface {
 	PendingBytes() int32
 
 	// AddEntry adds an entry to the Wantlist.
-	AddEntry(key cid.Cid, priority int32, wantType pb.Message_Wantlist_WantType, sendDontHave bool) int
+	AddEntry(key cid.Cid, priority int32, wantType pb.Message_Wantlist_WantType, sendDontHave bool, ttl int32) int
 
 	// Cancel adds a CANCEL for the given CID to the message
 	// Returns the size of the CANCEL entry in the protobuf
@@ -202,7 +202,7 @@ func newMessageFromProto(pbm pb.Message) (BitSwapMessage, error) {
 		if !e.Block.Cid.Defined() {
 			return nil, errCidMissing
 		}
-		m.addEntry(e.Block.Cid, e.Priority, e.Cancel, e.WantType, e.SendDontHave)
+		m.addEntry(e.Block.Cid, e.Priority, e.Cancel, e.WantType, e.SendDontHave, e.TTL)
 	}
 
 	// deprecated
@@ -307,14 +307,14 @@ func (m *impl) Remove(k cid.Cid) {
 }
 
 func (m *impl) Cancel(k cid.Cid) int {
-	return m.addEntry(k, 0, true, pb.Message_Wantlist_Block, false)
+	return m.addEntry(k, 0, true, pb.Message_Wantlist_Block, false, 0)
 }
 
-func (m *impl) AddEntry(k cid.Cid, priority int32, wantType pb.Message_Wantlist_WantType, sendDontHave bool) int {
-	return m.addEntry(k, priority, false, wantType, sendDontHave)
+func (m *impl) AddEntry(k cid.Cid, priority int32, wantType pb.Message_Wantlist_WantType, sendDontHave bool, ttl int32) int {
+	return m.addEntry(k, priority, false, wantType, sendDontHave, ttl)
 }
 
-func (m *impl) addEntry(c cid.Cid, priority int32, cancel bool, wantType pb.Message_Wantlist_WantType, sendDontHave bool) int {
+func (m *impl) addEntry(c cid.Cid, priority int32, cancel bool, wantType pb.Message_Wantlist_WantType, sendDontHave bool, ttl int32) int {
 	e, exists := m.wantlist[c]
 	if exists {
 		// Only change priority if want is of the same type
@@ -333,6 +333,10 @@ func (m *impl) addEntry(c cid.Cid, priority int32, cancel bool, wantType pb.Mess
 		if wantType == pb.Message_Wantlist_Block && e.WantType == pb.Message_Wantlist_Have {
 			e.WantType = wantType
 		}
+		// If we receive a lower ttl do not update because it may mean that we are reaching a cycle
+		if e.TTL < ttl {
+			e.TTL = ttl
+		}
 		m.wantlist[c] = e
 		return 0
 	}
@@ -342,6 +346,7 @@ func (m *impl) addEntry(c cid.Cid, priority int32, cancel bool, wantType pb.Mess
 			Cid:      c,
 			Priority: priority,
 			WantType: wantType,
+			TTL:      ttl,
 		},
 		SendDontHave: sendDontHave,
 		Cancel:       cancel,
