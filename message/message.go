@@ -247,7 +247,7 @@ func newMessageFromProto(pbm pb.Message) (BitSwapMessage, error) {
 		if pbm.Compression == pb.Message_BlockCompression {
 
 			// Initialize compressor.
-			compressor := intializeCompressor(pb.Message_BlockCompression)
+			compressor := getCompressor(pb.Message_BlockCompression)
 			//Uncompress compressed payload.
 			d = compressor.Uncompress(d)
 		}
@@ -269,7 +269,7 @@ func newMessageFromProto(pbm pb.Message) (BitSwapMessage, error) {
 		// If blocks compressed we need to regenerate CID from
 		if pbm.Compression == pb.Message_BlockCompression {
 			// Initialize compressor.
-			compressor := intializeCompressor(pb.Message_BlockCompression)
+			compressor := getCompressor(pb.Message_BlockCompression)
 			// Uncompress compressed payload.
 			d := compressor.Uncompress(b.GetData())
 			// Generate CID from uncompressed data.
@@ -491,18 +491,18 @@ func FromMsgReader(r msgio.Reader) (BitSwapMessage, error) {
 	return newMessageFromProto(pb)
 }
 
-func intializeCompressor(compressionType pb.Message_CompressionType) compression.Compressor {
+func getCompressor(compressionType pb.Message_CompressionType) compression.Compressor {
 	var compressor compression.Compressor
 
 	// For now we always use Gzip until we have other compression algorithms.
 	// This needs to be enhanced.
 	switch compressionType {
 	case pb.Message_Gzip:
-		compressor = compression.NewGzipCompressor("full")
+		compressor = compression.GzipCompressor("full")
 	case pb.Message_BlockCompression:
-		compressor = compression.NewGzipCompressor("blocks")
+		compressor = compression.GzipCompressor("blocks")
 	default:
-		compressor = compression.NewGzipCompressor("full")
+		compressor = compression.GzipCompressor("full")
 	}
 
 	return compressor
@@ -511,7 +511,7 @@ func intializeCompressor(compressionType pb.Message_CompressionType) compression
 func compressMsg(in *pb.Message, compressionType pb.Message_CompressionType) *pb.Message {
 
 	// Initialize compressor.
-	compressor := intializeCompressor(compressionType)
+	compressor := getCompressor(compressionType)
 
 	marshIn, err := in.Marshal()
 	if err != nil {
@@ -530,7 +530,7 @@ func compressMsg(in *pb.Message, compressionType pb.Message_CompressionType) *pb
 
 func uncompressMsg(in *pb.Message) (*pb.Message, error) {
 	// Initialize compressor.
-	compressor := intializeCompressor(in.Compression)
+	compressor := getCompressor(in.Compression)
 
 	//Uncompress compressed payload.
 	uncompPayload := compressor.Uncompress(in.CompressedPayload)
@@ -547,7 +547,7 @@ func uncompressMsg(in *pb.Message) (*pb.Message, error) {
 
 func (m *impl) ifBlockCompressionCompress(blks []blocks.Block) []blocks.Block {
 	if m.compression == pb.Message_BlockCompression {
-		compressor := intializeCompressor(pb.Message_BlockCompression)
+		compressor := getCompressor(pb.Message_BlockCompression)
 		blks = compressor.CompressBlocks(blks)
 	}
 	return blks

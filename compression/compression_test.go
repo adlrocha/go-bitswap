@@ -13,7 +13,7 @@ var compressionStrategy = "blocks"
 
 func TestGzip(t *testing.T) {
 	// Initialize GZip compressor
-	c := NewGzipCompressor(compressionStrategy)
+	c := GzipCompressor(compressionStrategy)
 	if CompressionPool == nil {
 		t.Fatalf("CompressionPool not initialized succesfully")
 	}
@@ -36,7 +36,7 @@ func TestGzip(t *testing.T) {
 func TestCompressBlocks(t *testing.T) {
 
 	// Compress and uncompress list of blocks
-	c := NewGzipCompressor(compressionStrategy)
+	c := GzipCompressor(compressionStrategy)
 
 	blks := GenerateBlocksOfSize(5, 1234567)
 

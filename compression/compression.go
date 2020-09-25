@@ -32,8 +32,8 @@ type Gzip struct {
 	compressionStrategy string
 }
 
-// NewGzipCompressor intialize a new GZip compressor.
-func NewGzipCompressor(compressionStrategy string) Compressor {
+// GzipCompressor intialize a new GZip compressor.
+func GzipCompressor(compressionStrategy string) Compressor {
 	// We use BestCompression by default. But this is prepared
 	// to configure compressor with other options such as:
 	// gzip.BestSpeed.

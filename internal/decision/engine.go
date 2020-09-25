@@ -245,7 +245,7 @@ func (e *Engine) startScoreLedger(px process.Process) {
 
 // InitializeCompressor with specific strategy.
 func (e *Engine) InitCompressor(compressionStrategy string) {
-	e.compressor = compression.NewGzipCompressor(compressionStrategy)
+	e.compressor = compression.GzipCompressor(compressionStrategy)
 }
 
 // Start up workers to handle requests from other nodes for the data on this node
