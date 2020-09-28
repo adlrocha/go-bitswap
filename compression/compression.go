@@ -39,7 +39,7 @@ func GzipCompressor(compressionStrategy string) Compressor {
 	// gzip.BestSpeed.
 	// gzip.BestCompression
 	// Best trade-off results gzip.DefaultCompression
-	compressionLevel := gzip.BestCompression
+	compressionLevel := gzip.DefaultCompression
 
 	// Initialize the pool if it hasn't been initialized.
 	if CompressionPool == nil {
@@ -92,7 +92,7 @@ func (g *Gzip) Uncompress(in []byte) []byte {
 	out := make([]byte, 2*inBuf.Len())
 	r, err := gzip.NewReader(inBuf)
 	if err != nil {
-		log.Debugf("[ERROR] Error uncompressing data!! %w", err)
+		log.Debugf("[ERROR] Error initializing reader!! %w", err)
 	}
 
 	// Careful! If we don't read the full reader the compression
@@ -100,7 +100,7 @@ func (g *Gzip) Uncompress(in []byte) []byte {
 	// of 32768 compressed.
 	count, err := io.ReadFull(r, out)
 	if err != nil {
-		log.Debugf("[ERROR] Error uncompressing data!! %w", err)
+		log.Debugf("[ERROR] Error uncompressing data in compression readFull %w", err)
 	}
 	r.Close()
 

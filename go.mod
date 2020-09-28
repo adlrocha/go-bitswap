@@ -31,6 +31,7 @@ require (
 	github.com/multiformats/go-multistream v0.1.1
 	github.com/whyrusleeping/gx v0.14.3 // indirect
 	github.com/whyrusleeping/gx-go v1.9.0 // indirect
+	go.uber.org/multierr v1.5.0
 	go.uber.org/zap v1.14.1
 	google.golang.org/protobuf v1.25.0 // indirect
 )
