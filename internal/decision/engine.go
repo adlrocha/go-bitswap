@@ -9,12 +9,14 @@ import (
 
 	"github.com/google/uuid"
 
+	bssm "github.com/ipfs/go-bitswap/internal/sessionmanager"
 	bsmsg "github.com/ipfs/go-bitswap/message"
 	pb "github.com/ipfs/go-bitswap/message/pb"
 	wl "github.com/ipfs/go-bitswap/wantlist"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	bstore "github.com/ipfs/go-ipfs-blockstore"
+	delay "github.com/ipfs/go-ipfs-delay"
 	logging "github.com/ipfs/go-log"
 	"github.com/ipfs/go-peertaskqueue"
 	"github.com/ipfs/go-peertaskqueue/peertask"
@@ -79,6 +81,9 @@ const (
 
 	// Number of concurrent workers that process requests to the blockstore
 	blockstoreWorkerCount = 128
+
+	// Defualt ProvSearchDelay indirect sessions
+	defaultProvSearchDelay = time.Second
 )
 
 // Envelope contains a message for a Peer.
@@ -142,6 +147,7 @@ type Engine struct {
 	outbox chan (<-chan *Envelope)
 
 	bsm *blockstoreManager
+	sm  *bssm.SessionManager
 
 	peerTagger PeerTagger
 
@@ -167,16 +173,19 @@ type Engine struct {
 	sendDontHaves bool
 
 	self peer.ID
+
+	// indirectSessions registry. Tracks indirect sessions (blocks searched for others)
+	indirectSessions *sessionRegistry
 }
 
 // NewEngine creates a new block sending engine for the given block store
-func NewEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger, self peer.ID) *Engine {
-	return newEngine(ctx, bs, peerTagger, self, maxBlockSizeReplaceHasWithBlock, nil)
+func NewEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger, self peer.ID, sm *bssm.SessionManager) *Engine {
+	return newEngine(ctx, bs, peerTagger, self, maxBlockSizeReplaceHasWithBlock, nil, sm)
 }
 
 // This constructor is used by the tests
 func newEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger, self peer.ID,
-	maxReplaceSize int, scoreLedger ScoreLedger) *Engine {
+	maxReplaceSize int, scoreLedger ScoreLedger, sm *bssm.SessionManager) *Engine {
 
 	e := &Engine{
 		ledgerMap:                       make(map[peer.ID]*ledger),
@@ -190,6 +199,8 @@ func newEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger,
 		taskWorkerCount:                 taskWorkerCount,
 		sendDontHaves:                   true,
 		self:                            self,
+		sm:                              sm,
+		indirectSessions:                newSessionRegistry(),
 	}
 	e.tagQueued = fmt.Sprintf(tagFormat, "queued", uuid.New().String())
 	e.tagUseful = fmt.Sprintf(tagFormat, "useful", uuid.New().String())
@@ -199,6 +210,18 @@ func newEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger,
 		peertaskqueue.TaskMerger(newTaskMerger()),
 		peertaskqueue.IgnoreFreezing(true))
 	return e
+}
+
+// OnlyIndirectSessions checks if the list of sessions passed are only indirect.
+func (e *Engine) OnlyIndirectSessions(interestedSessions []uint64) bool {
+	for _, sess := range interestedSessions {
+		// If one of the interested sessions is not indirect means that it is
+		// direct
+		if !e.indirectSessions.has(sess) {
+			return false
+		}
+	}
+	return true
 }
 
 // SetSendDontHaves indicates what to do when the engine receives a want-block
@@ -367,6 +390,27 @@ func (e *Engine) nextEnvelope(ctx context.Context) (*Envelope, error) {
 			return nil, err
 		}
 
+		// Remove blocks being sent from indirect sessions.
+		for _, b := range blks {
+			log.Debugf("Removing key from indirect session as it's being sent.")
+			e.indirectSessions.removeKey(b.Cid())
+			// TODO: Here we should remove all blocks from indirect sessions
+			// to avoid having data we haven't requested. I am going to address
+			// this in the future, because I could remove blocks that belong exclusively
+			// to active indirect sessions, but I don't know if a direct session
+			// requested it before and I am "garbage collecting" useful information
+			// requested by the peer. We could think of a garbage collection strategy
+			// for "useless" blocks.
+
+			// // Retrieve interested sessions for the block.
+			// sess := e.sim.InterestedSessions([]cid.Cid{b.Cid()}, []cid.Cid{}, []cid.Cid{})
+			// // Check if only indirect sessions interested in block.
+			// if !e.OnlyIndirectSessions(sess) {
+			// 	// Remove from datastore.
+			// 	e.bsm.bs.DeleteBlock(b.Cid())
+			// }
+		}
+
 		for c, t := range blockTasks {
 			blk := blks[c]
 			// If the block was not found (it has been removed)
@@ -476,13 +520,22 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 
 	var activeEntries []peertask.Task
 
-	// Remove cancelled blocks from the queue
+	// For cancels seen
 	for _, entry := range cancels {
+		// Remove keys cancelled from indirect sessions, and the full session if there are
+		// no keys pending.
+		log.Debugf("Removing key from received cancels")
+		e.indirectSessions.removeKey(entry.Cid)
+		// Remove cancelled blocks from the queue
 		log.Debugw("Bitswap engine <- cancel", "local", e.self, "from", p, "cid", entry.Cid)
 		if l.CancelWant(entry.Cid) {
 			e.peerRequestQueue.Remove(entry.Cid, p)
 		}
 	}
+
+	// Track keys of blocks not found in peer with enough TTL to start an
+	// indirect session.
+	indirectKs := newKeyTracker()
 
 	// For each want-have / want-block
 	for _, entry := range wants {
@@ -496,32 +549,38 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 		if !found {
 			log.Debugw("Bitswap engine: block not found", "local", e.self, "from", p, "cid", entry.Cid, "sendDontHave", entry.SendDontHave)
 
-			if entry.TTL != 0 {
-				// TODO: If we don't find the block and there is still TTL
-				// we start an indirect sesion, i.e. I start a new session and send
-				// want messages to all my connected peers with TTL=entry.TTL - 1
+			if entry.TTL > 0 {
+				// If we still have TTL add CIDs to start an indirect session for that TTL.
+				log.Debugf("Updating tracker to start a new indirect session for %s, %d, %d", entry.Cid, entry.TTL, entry.Priority)
+				// Send
+				indirectKs.updateTracker(entry.TTL, entry.Priority, entry.Cid)
+			}
+			// Only add the task to the queue if the requester wants a DONT_HAVE
+			// We only send dontHaves want TTL expires.
 
-			} else {
-				// Only add the task to the queue if the requester wants a DONT_HAVE
-				if e.sendDontHaves && entry.SendDontHave {
-					newWorkExists = true
-					isWantBlock := false
-					if entry.WantType == pb.Message_Wantlist_Block {
-						isWantBlock = true
-					}
-
-					activeEntries = append(activeEntries, peertask.Task{
-						Topic:    c,
-						Priority: int(entry.Priority),
-						Work:     bsmsg.BlockPresenceSize(c),
-						Data: &taskData{
-							BlockSize:    0,
-							HaveBlock:    false,
-							IsWantBlock:  isWantBlock,
-							SendDontHave: entry.SendDontHave,
-						},
-					})
+			// We always send a DON'T HAVE right away even if we end up triggering
+			// and indirectSession to minimize duplicates. If the indirect session
+			// ends up finding the block it will send a HAVE message and update
+			// the requested accordingly. DON'T HAVEs are updatable through new
+			// BlockPresence information.
+			if e.sendDontHaves && entry.SendDontHave {
+				newWorkExists = true
+				isWantBlock := false
+				if entry.WantType == pb.Message_Wantlist_Block {
+					isWantBlock = true
 				}
+
+				activeEntries = append(activeEntries, peertask.Task{
+					Topic:    c,
+					Priority: int(entry.Priority),
+					Work:     bsmsg.BlockPresenceSize(c),
+					Data: &taskData{
+						BlockSize:    0,
+						HaveBlock:    false,
+						IsWantBlock:  isWantBlock,
+						SendDontHave: entry.SendDontHave,
+					},
+				})
 			}
 		} else {
 			// The block was found, add it to the queue
@@ -550,6 +609,14 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 					SendDontHave: entry.SendDontHave,
 				},
 			})
+		}
+	}
+
+	// Start an indirect session for each of the wants with pending TTL
+	for ttl, obs := range indirectKs.t {
+		for priority, keys := range obs {
+			log.Debugf("Starting indirectSession %v, %d, %d", keys, ttl, priority)
+			e.startIndirectSession(ctx, p, keys, ttl-1, priority)
 		}
 	}
 
@@ -588,6 +655,7 @@ func (e *Engine) ReceiveFrom(from peer.ID, blks []blocks.Block, haves []cid.Cid)
 		l.lk.Lock()
 
 		// Record how many bytes were received in the ledger
+		// TODO: Should we account for indirect blocks that will be forwarded also? Because we are doing so.
 		for _, blk := range blks {
 			log.Debugw("Bitswap engine <- block", "local", e.self, "from", from, "cid", blk.Cid(), "size", len(blk.RawData()))
 			e.scoreLedger.AddToReceivedBytes(l.Partner, len(blk.RawData()))
@@ -596,15 +664,38 @@ func (e *Engine) ReceiveFrom(from peer.ID, blks []blocks.Block, haves []cid.Cid)
 		l.lk.Unlock()
 	}
 
-	// Get the size of each block
-	blockSizes := make(map[cid.Cid]int, len(blks))
-	for _, blk := range blks {
-		blockSizes[blk.Cid()] = len(blk.RawData())
-	}
-
 	// Check each peer to see if it wants one of the blocks we received
 	work := false
 	e.lock.RLock()
+
+	blockSizes := make(map[cid.Cid]int, len(blks))
+	for _, blk := range blks {
+		// Get the size of each block
+		blockSizes[blk.Cid()] = len(blk.RawData())
+		log.Debugf("Forwarding blocks to indirect sessions...")
+		// Forward every block received to peers from indirect sessions
+		// interested in them.
+		interestedSessions := e.indirectSessions.interestedSessions(blk.Cid())
+
+		for _, sess := range interestedSessions {
+			log.Debugf("Sending block to indirect session: %v", sess.cids)
+
+			work = true
+			e.peerRequestQueue.PushTasks(sess.peer, peertask.Task{
+				Topic:    blk.Cid(),
+				Priority: int(sess.cids[blk.Cid()]),
+				Work:     blockSizes[blk.Cid()],
+				Data: &taskData{
+					BlockSize:    blockSizes[blk.Cid()],
+					HaveBlock:    true, // I have the block
+					IsWantBlock:  true, // I want to forward the actual block
+					SendDontHave: false,
+				},
+			})
+		}
+		// The blocks will be removed once they are sent in nextEnvelope to ensure
+		// that they are removed from datastore when they are no longer needed.
+	}
 
 	for _, l := range e.ledgerMap {
 		l.lk.RLock()
@@ -638,10 +729,52 @@ func (e *Engine) ReceiveFrom(from peer.ID, blks []blocks.Block, haves []cid.Cid)
 		}
 		l.lk.RUnlock()
 	}
+
+	// Forward every have message of indirect sessions to its source.
+	for _, h := range haves {
+		work = true
+		interestedSessions := e.indirectSessions.interestedSessions(h)
+		// Entrysize of block presence
+		entrySize := bsmsg.BlockPresenceSize(h)
+		for _, sess := range interestedSessions {
+			log.Debug("Forwarding HAVE message to source %v", sess.peer)
+			e.peerRequestQueue.PushTasks(sess.peer, peertask.Task{
+				Topic:    h,
+				Priority: int(sess.cids[h]),
+				Work:     entrySize,
+				Data: &taskData{
+					// BlockSize:    0, // Not sending a block, forwarding a have mesage. So don't have size.
+					HaveBlock:    true,
+					IsWantBlock:  false, // I am forwarding a HAVE
+					SendDontHave: false,
+				},
+			})
+		}
+	}
 	e.lock.RUnlock()
 
 	if work {
 		e.signalNewWork()
+	}
+}
+
+// Determines what peers to include in a indirect session.
+// This also allows to remove loops in the transmission of WANTs with TTLs.
+func (e *Engine) startIndirectSession(ctx context.Context, peer peer.ID,
+	keys []cid.Cid, ttl int32, priority int32) {
+	// Check if there is already an indirect session for that peer and that cid
+	// before starting  anew one.
+	keys = e.indirectSessions.notActive(peer, keys)
+	log.Debugf("Keys to start indirect session with ttl %d for %v", ttl, keys)
+	// If there are keys not included in an indirect session for a peer it needs to be started.
+	if len(keys) != 0 {
+		// Create session
+		session, id := e.sm.NewIndirectSession(ctx, defaultProvSearchDelay, delay.Fixed(time.Minute), ttl)
+		// Add session ID to indirect session registry.
+		e.indirectSessions.add(id, peer, keys, ttl, priority)
+		log.Debugf("Triggering block search")
+		// Trigger block search
+		session.GetBlocks(ctx, keys)
 	}
 }
 

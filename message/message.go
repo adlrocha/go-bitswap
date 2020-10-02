@@ -120,6 +120,7 @@ func (e *Entry) ToPB() pb.Message_Wantlist_Entry {
 		Cancel:       e.Cancel,
 		WantType:     e.WantType,
 		SendDontHave: e.SendDontHave,
+		TTL:          e.TTL,
 	}
 }
 

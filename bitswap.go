@@ -47,6 +47,7 @@ const (
 	// these requests take at _least_ two minutes at the moment.
 	provideTimeout         = time.Minute * 3
 	defaultProvSearchDelay = time.Second
+	defaultTTL             = 1
 )
 
 var (
@@ -77,6 +78,13 @@ func ProvideEnabled(enabled bool) Option {
 func ProviderSearchDelay(newProvSearchDelay time.Duration) Option {
 	return func(bs *Bitswap) {
 		bs.provSearchDelay = newProvSearchDelay
+	}
+}
+
+// SetTTL overwrites the defaultTTL for Bitswap WANT messages
+func SetTTL(newTTL int32) Option {
+	return func(bs *Bitswap) {
+		bs.ttl = newTTL
 	}
 }
 
@@ -140,8 +148,8 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 		// Simulate a message arriving with DONT_HAVEs
 		sm.ReceiveFrom(ctx, p, nil, nil, dontHaves)
 	}
-	peerQueueFactory := func(ctx context.Context, p peer.ID) bspm.PeerQueue {
-		return bsmq.New(ctx, p, network, onDontHaveTimeout)
+	peerQueueFactory := func(ctx context.Context, p peer.ID, ttl int32) bspm.PeerQueue {
+		return bsmq.New(ctx, p, network, onDontHaveTimeout, ttl)
 	}
 
 	sim := bssim.New()
@@ -160,15 +168,17 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 		notif notifications.PubSub,
 		provSearchDelay time.Duration,
 		rebroadcastDelay delay.D,
-		self peer.ID) bssm.Session {
-		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self)
+		self peer.ID,
+		ttl int32,
+		indirect bool) bssm.Session {
+		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self, ttl, indirect)
 	}
 	sessionPeerManagerFactory := func(ctx context.Context, id uint64) bssession.SessionPeerManager {
 		return bsspm.New(id, network.ConnectionManager())
 	}
 	notif := notifications.New()
 	sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self())
-	engine := decision.NewEngine(ctx, bstore, network.ConnectionManager(), network.Self())
+	engine := decision.NewEngine(ctx, bstore, network.ConnectionManager(), network.Self(), sm)
 
 	bs := &Bitswap{
 		blockstore:       bstore,
@@ -189,6 +199,7 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 		provideEnabled:   true,
 		provSearchDelay:  defaultProvSearchDelay,
 		rebroadcastDelay: delay.Fixed(time.Minute),
+		ttl:              defaultTTL,
 	}
 
 	// apply functional options before starting and running bitswap
@@ -271,6 +282,9 @@ type Bitswap struct {
 
 	// how often to rebroadcast providing requests to find more optimized providers
 	rebroadcastDelay delay.D
+
+	// Initial TTL used for bitswap messages
+	ttl int32
 }
 
 type counters struct {
@@ -326,7 +340,7 @@ func (bs *Bitswap) LedgerForPeer(p peer.ID) *decision.Receipt {
 // resources, provide a context with a reasonably short deadline (ie. not one
 // that lasts throughout the lifetime of the server)
 func (bs *Bitswap) GetBlocks(ctx context.Context, keys []cid.Cid) (<-chan blocks.Block, error) {
-	session := bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay)
+	session := bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay, bs.ttl)
 	return session.GetBlocks(ctx, keys)
 }
 
@@ -359,6 +373,11 @@ func (bs *Bitswap) receiveBlocksFrom(ctx context.Context, from peer.ID, blks []b
 	}
 
 	// Put wanted blocks into blockstore
+	// Those belonging for indirect sessions will have to be removed
+	// to avoid storing content I wasn't interested in. Will do this once the block
+	// has been successfully forwarded.
+	// NOTE: Check nextEnvelop in engine.go to see how this is currently
+	// (and could be in the future) approached.
 	if len(wanted) > 0 {
 		err := bs.blockstore.PutMany(wanted)
 		if err != nil {
@@ -373,6 +392,7 @@ func (bs *Bitswap) receiveBlocksFrom(ctx context.Context, from peer.ID, blks []b
 	// to the same node. We should address this soon, but i'm not going to do
 	// it now as it requires more thought and isnt causing immediate problems.
 
+	// We need to notify every session about the blocks received.
 	allKs := make([]cid.Cid, 0, len(blks))
 	for _, b := range blks {
 		allKs = append(allKs, b.Cid())
@@ -403,6 +423,8 @@ func (bs *Bitswap) receiveBlocksFrom(ctx context.Context, from peer.ID, blks []b
 	}
 
 	// If the reprovider is enabled, send wanted blocks to reprovider
+	// even if they come from indirect sesssions. This can also
+	// amplify the discovery (and potential duplicates and traffic overhead).
 	if bs.provideEnabled {
 		for _, blk := range wanted {
 			select {
@@ -550,7 +572,7 @@ func (bs *Bitswap) blockstoreHas(blks []blocks.Block) []bool {
 // PeerConnected is called by the network interface
 // when a peer initiates a new connection to bitswap.
 func (bs *Bitswap) PeerConnected(p peer.ID) {
-	bs.pm.Connected(p)
+	bs.pm.Connected(p, bs.ttl)
 	bs.engine.PeerConnected(p)
 }
 
@@ -602,5 +624,5 @@ func (bs *Bitswap) IsOnline() bool {
 // be more efficient in its requests to peers. If you are using a session
 // from go-blockservice, it will create a bitswap session automatically.
 func (bs *Bitswap) NewSession(ctx context.Context) exchange.Fetcher {
-	return bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay)
+	return bs.sm.NewSession(ctx, bs.provSearchDelay, bs.rebroadcastDelay, bs.ttl)
 }

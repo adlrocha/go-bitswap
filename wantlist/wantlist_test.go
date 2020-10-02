@@ -179,6 +179,9 @@ func TestAbsort(t *testing.T) {
 	if e.WantType != pb.Message_Wantlist_Block {
 		t.Fatal("expected type ", pb.Message_Wantlist_Block)
 	}
+	if e.TTL != 2 {
+		t.Fatal("expected TTL 2")
+	}
 
 	e, ok = wl.Contains(testcids[1])
 	if !ok {
@@ -190,6 +193,9 @@ func TestAbsort(t *testing.T) {
 	if e.WantType != pb.Message_Wantlist_Block {
 		t.Fatal("expected type ", pb.Message_Wantlist_Block)
 	}
+	if e.TTL != 2 {
+		t.Fatal("expected TTL 2")
+	}
 
 	e, ok = wl.Contains(testcids[2])
 	if !ok {
@@ -200,6 +206,9 @@ func TestAbsort(t *testing.T) {
 	}
 	if e.WantType != pb.Message_Wantlist_Have {
 		t.Fatal("expected type ", pb.Message_Wantlist_Have)
+	}
+	if e.TTL != 2 {
+		t.Fatal("expected TTL 2")
 	}
 }
 

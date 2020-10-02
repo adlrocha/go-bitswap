@@ -36,7 +36,9 @@ type SessionFactory func(
 	notif notifications.PubSub,
 	provSearchDelay time.Duration,
 	rebroadcastDelay delay.D,
-	self peer.ID) Session
+	self peer.ID,
+	ttl int32,
+	indirect bool) Session
 
 // PeerManagerFactory generates a new peer manager for a session.
 type PeerManagerFactory func(ctx context.Context, id uint64) bssession.SessionPeerManager
@@ -84,11 +86,12 @@ func New(ctx context.Context, sessionFactory SessionFactory, sessionInterestMana
 // session manager.
 func (sm *SessionManager) NewSession(ctx context.Context,
 	provSearchDelay time.Duration,
-	rebroadcastDelay delay.D) exchange.Fetcher {
+	rebroadcastDelay delay.D,
+	ttl int32) exchange.Fetcher {
 	id := sm.GetNextSessionID()
 
 	pm := sm.peerManagerFactory(ctx, id)
-	session := sm.sessionFactory(ctx, sm, id, pm, sm.sessionInterestManager, sm.peerManager, sm.blockPresenceManager, sm.notif, provSearchDelay, rebroadcastDelay, sm.self)
+	session := sm.sessionFactory(ctx, sm, id, pm, sm.sessionInterestManager, sm.peerManager, sm.blockPresenceManager, sm.notif, provSearchDelay, rebroadcastDelay, sm.self, ttl, false)
 
 	sm.sessLk.Lock()
 	if sm.sessions != nil { // check if SessionManager was shutdown
@@ -97,6 +100,26 @@ func (sm *SessionManager) NewSession(ctx context.Context,
 	sm.sessLk.Unlock()
 
 	return session
+}
+
+// NewIndirectSession initializes a session with the given context, and adds to the
+// session manager returning the id
+func (sm *SessionManager) NewIndirectSession(ctx context.Context,
+	provSearchDelay time.Duration,
+	rebroadcastDelay delay.D,
+	ttl int32) (exchange.Fetcher, uint64) {
+	id := sm.GetNextSessionID()
+
+	pm := sm.peerManagerFactory(ctx, id)
+	session := sm.sessionFactory(ctx, sm, id, pm, sm.sessionInterestManager, sm.peerManager, sm.blockPresenceManager, sm.notif, provSearchDelay, rebroadcastDelay, sm.self, ttl, true)
+
+	sm.sessLk.Lock()
+	if sm.sessions != nil { // check if SessionManager was shutdown
+		sm.sessions[id] = session
+	}
+	sm.sessLk.Unlock()
+
+	return session, id
 }
 
 func (sm *SessionManager) Shutdown() {

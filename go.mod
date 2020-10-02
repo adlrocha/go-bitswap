@@ -29,6 +29,7 @@ require (
 	github.com/multiformats/go-multiaddr v0.2.1
 	github.com/multiformats/go-multistream v0.1.1
 	go.uber.org/zap v1.14.1
+	google.golang.org/appengine v1.4.0
 )
 
 // replace github.com/ipfs/go-bitswap => github.com/adlrocha/go-bitswap v0.2.19

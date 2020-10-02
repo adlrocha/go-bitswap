@@ -204,7 +204,7 @@ func TestMessageSendAndReceive(t *testing.T) {
 	block1 := blockGenerator.Next()
 	block2 := blockGenerator.Next()
 	sent := bsmsg.New(false)
-	sent.AddEntry(block1.Cid(), 1, pb.Message_Wantlist_Block, true)
+	sent.AddEntry(block1.Cid(), 1, pb.Message_Wantlist_Block, true, 1)
 	sent.AddBlock(block2)
 
 	err = bsnet1.SendMessage(ctx, p2.ID(), sent)
@@ -237,7 +237,8 @@ func TestMessageSendAndReceive(t *testing.T) {
 	receivedWant := receivedWants[0]
 	if receivedWant.Cid != sentWant.Cid ||
 		receivedWant.Priority != sentWant.Priority ||
-		receivedWant.Cancel != sentWant.Cancel {
+		receivedWant.Cancel != sentWant.Cancel ||
+		receivedWant.TTL != sentWant.TTL {
 		t.Fatal("Sent message wants did not match received message wants")
 	}
 	sentBlocks := sent.Blocks()
@@ -308,7 +309,7 @@ func prepareNetwork(t *testing.T, ctx context.Context, p1 tnet.Identity, r1 *rec
 	blockGenerator := blocksutil.NewBlockGenerator()
 	block1 := blockGenerator.Next()
 	msg := bsmsg.New(false)
-	msg.AddEntry(block1.Cid(), 1, pb.Message_Wantlist_Block, true)
+	msg.AddEntry(block1.Cid(), 1, pb.Message_Wantlist_Block, true, 1)
 
 	return eh1, bsnet1, eh2, bsnet2, msg
 }

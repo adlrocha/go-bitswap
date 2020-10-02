@@ -15,8 +15,8 @@ var log = logging.Logger("bs:peermgr")
 
 // PeerQueue provides a queue of messages to be sent for a single peer.
 type PeerQueue interface {
-	AddBroadcastWantHaves([]cid.Cid)
-	AddWants([]cid.Cid, []cid.Cid)
+	AddBroadcastWantHaves([]cid.Cid, int32)
+	AddWants([]cid.Cid, []cid.Cid, int32)
 	AddCancels([]cid.Cid)
 	ResponseReceived(ks []cid.Cid)
 	Startup()
@@ -29,7 +29,7 @@ type Session interface {
 }
 
 // PeerQueueFactory provides a function that will create a PeerQueue.
-type PeerQueueFactory func(ctx context.Context, p peer.ID) PeerQueue
+type PeerQueueFactory func(ctx context.Context, p peer.ID, ttl int32) PeerQueue
 
 // PeerManager manages a pool of peers and sends messages to peers in the pool.
 type PeerManager struct {
@@ -84,14 +84,14 @@ func (pm *PeerManager) ConnectedPeers() []peer.ID {
 
 // Connected is called to add a new peer to the pool, and send it an initial set
 // of wants.
-func (pm *PeerManager) Connected(p peer.ID) {
+func (pm *PeerManager) Connected(p peer.ID, ttl int32) {
 	pm.pqLk.Lock()
 	defer pm.pqLk.Unlock()
 
-	pq := pm.getOrCreate(p)
+	pq := pm.getOrCreate(p, ttl)
 
 	// Inform the peer want manager that there's a new peer
-	pm.pwm.addPeer(pq, p)
+	pm.pwm.addPeer(pq, p, ttl)
 
 	// Inform the sessions that the peer has connected
 	pm.signalAvailability(p, true)
@@ -134,26 +134,27 @@ func (pm *PeerManager) ResponseReceived(p peer.ID, ks []cid.Cid) {
 // to discover seeds).
 // For each peer it filters out want-haves that have previously been sent to
 // the peer.
-func (pm *PeerManager) BroadcastWantHaves(ctx context.Context, wantHaves []cid.Cid) {
+func (pm *PeerManager) BroadcastWantHaves(ctx context.Context, wantHaves []cid.Cid, ttl int32) {
 	pm.pqLk.Lock()
 	defer pm.pqLk.Unlock()
 
-	pm.pwm.broadcastWantHaves(wantHaves)
+	pm.pwm.broadcastWantHaves(wantHaves, ttl)
 }
 
 // SendWants sends the given want-blocks and want-haves to the given peer.
 // It filters out wants that have previously been sent to the peer.
-func (pm *PeerManager) SendWants(ctx context.Context, p peer.ID, wantBlocks []cid.Cid, wantHaves []cid.Cid) {
+func (pm *PeerManager) SendWants(ctx context.Context, p peer.ID, wantBlocks []cid.Cid, wantHaves []cid.Cid, ttl int32) {
 	pm.pqLk.Lock()
 	defer pm.pqLk.Unlock()
 
 	if _, ok := pm.peerQueues[p]; ok {
-		pm.pwm.sendWants(p, wantBlocks, wantHaves)
+		pm.pwm.sendWants(p, wantBlocks, wantHaves, ttl)
 	}
 }
 
 // SendCancels sends cancels for the given keys to all peers who had previously
 // received a want for those keys.
+// TODO: Should include TTLs in cancels?
 func (pm *PeerManager) SendCancels(ctx context.Context, cancelKs []cid.Cid) {
 	pm.pqLk.Lock()
 	defer pm.pqLk.Unlock()
@@ -186,10 +187,12 @@ func (pm *PeerManager) CurrentWantHaves() []cid.Cid {
 	return pm.pwm.getWantHaves()
 }
 
-func (pm *PeerManager) getOrCreate(p peer.ID) PeerQueue {
+// We create a messageQueue with a specific TTL according to
+// if it is a direct or a indirect session.
+func (pm *PeerManager) getOrCreate(p peer.ID, ttl int32) PeerQueue {
 	pq, ok := pm.peerQueues[p]
 	if !ok {
-		pq = pm.createPeerQueue(pm.ctx, p)
+		pq = pm.createPeerQueue(pm.ctx, p, ttl)
 		pq.Startup()
 		pm.peerQueues[p] = pq
 	}

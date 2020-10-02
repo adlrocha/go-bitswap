@@ -20,6 +20,8 @@ import (
 	peer "github.com/libp2p/go-libp2p-core/peer"
 )
 
+var defaultTTL int32 = 1
+
 type fakeSession struct {
 	ks         []cid.Cid
 	wantBlocks []cid.Cid
@@ -28,6 +30,8 @@ type fakeSession struct {
 	pm         *fakeSesPeerManager
 	sm         bssession.SessionManager
 	notif      notifications.PubSub
+	ttl        int32
+	indirect   bool
 }
 
 func (*fakeSession) GetBlock(context.Context, cid.Cid) (blocks.Block, error) {
@@ -64,10 +68,10 @@ type fakePeerManager struct {
 	cancels []cid.Cid
 }
 
-func (*fakePeerManager) RegisterSession(peer.ID, bspm.Session)                    {}
-func (*fakePeerManager) UnregisterSession(uint64)                                 {}
-func (*fakePeerManager) SendWants(context.Context, peer.ID, []cid.Cid, []cid.Cid) {}
-func (*fakePeerManager) BroadcastWantHaves(context.Context, []cid.Cid)            {}
+func (*fakePeerManager) RegisterSession(peer.ID, bspm.Session)                           {}
+func (*fakePeerManager) UnregisterSession(uint64)                                        {}
+func (*fakePeerManager) SendWants(context.Context, peer.ID, []cid.Cid, []cid.Cid, int32) {}
+func (*fakePeerManager) BroadcastWantHaves(context.Context, []cid.Cid, int32)            {}
 func (fpm *fakePeerManager) SendCancels(ctx context.Context, cancels []cid.Cid) {
 	fpm.lk.Lock()
 	defer fpm.lk.Unlock()
@@ -89,12 +93,16 @@ func sessionFactory(ctx context.Context,
 	notif notifications.PubSub,
 	provSearchDelay time.Duration,
 	rebroadcastDelay delay.D,
-	self peer.ID) Session {
+	self peer.ID,
+	ttl int32,
+	indirect bool) Session {
 	fs := &fakeSession{
-		id:    id,
-		pm:    sprm.(*fakeSesPeerManager),
-		sm:    sm,
-		notif: notif,
+		id:       id,
+		pm:       sprm.(*fakeSesPeerManager),
+		sm:       sm,
+		notif:    notif,
+		ttl:      ttl,
+		indirect: indirect,
 	}
 	go func() {
 		<-ctx.Done()
@@ -121,9 +129,9 @@ func TestReceiveFrom(t *testing.T) {
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
 
-	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
-	secondSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
-	thirdSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
+	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL).(*fakeSession)
+	secondSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL).(*fakeSession)
+	thirdSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL).(*fakeSession)
 
 	sim.RecordSessionInterest(firstSession.ID(), []cid.Cid{block.Cid()})
 	sim.RecordSessionInterest(thirdSession.ID(), []cid.Cid{block.Cid()})
@@ -168,9 +176,9 @@ func TestReceiveBlocksWhenManagerShutdown(t *testing.T) {
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
 
-	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
-	secondSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
-	thirdSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
+	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL).(*fakeSession)
+	secondSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL).(*fakeSession)
+	thirdSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL).(*fakeSession)
 
 	sim.RecordSessionInterest(firstSession.ID(), []cid.Cid{block.Cid()})
 	sim.RecordSessionInterest(secondSession.ID(), []cid.Cid{block.Cid()})
@@ -202,10 +210,10 @@ func TestReceiveBlocksWhenSessionContextCancelled(t *testing.T) {
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
 
-	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
+	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL).(*fakeSession)
 	sessionCtx, sessionCancel := context.WithCancel(ctx)
-	secondSession := sm.NewSession(sessionCtx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
-	thirdSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
+	secondSession := sm.NewSession(sessionCtx, time.Second, delay.Fixed(time.Minute), defaultTTL).(*fakeSession)
+	thirdSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL).(*fakeSession)
 
 	sim.RecordSessionInterest(firstSession.ID(), []cid.Cid{block.Cid()})
 	sim.RecordSessionInterest(secondSession.ID(), []cid.Cid{block.Cid()})
@@ -238,7 +246,7 @@ func TestShutdown(t *testing.T) {
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
 	cids := []cid.Cid{block.Cid()}
-	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute)).(*fakeSession)
+	firstSession := sm.NewSession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL).(*fakeSession)
 	sim.RecordSessionInterest(firstSession.ID(), cids)
 	sm.ReceiveFrom(ctx, p, []cid.Cid{}, []cid.Cid{}, cids)
 
@@ -256,5 +264,60 @@ func TestShutdown(t *testing.T) {
 	}
 	if !testutil.MatchKeysIgnoreOrder(pm.cancelled(), cids) {
 		t.Fatal("expected cancels to be sent")
+	}
+}
+
+func TestReceiveFromIndirectSesesion(t *testing.T) {
+	ctx := context.Background()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	notif := notifications.New()
+	defer notif.Shutdown()
+	sim := bssim.New()
+	bpm := bsbpm.New()
+	pm := &fakePeerManager{}
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+
+	p := peer.ID(123)
+	block := blocks.NewBlock([]byte("block"))
+
+	sess1, id1 := sm.NewIndirectSession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL)
+	sess2, id2 := sm.NewIndirectSession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL)
+	sess3, id3 := sm.NewIndirectSession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL)
+	firstSession := sess1.(*fakeSession)
+	secondSession := sess2.(*fakeSession)
+	thirdSession := sess3.(*fakeSession)
+
+	if firstSession.ID() != id1 || secondSession.ID() != id2 ||
+		thirdSession.ID() != id3 {
+		t.Fatal("Indirect session with wrong ids")
+	}
+
+	sim.RecordSessionInterest(firstSession.ID(), []cid.Cid{block.Cid()})
+	sim.RecordSessionInterest(thirdSession.ID(), []cid.Cid{block.Cid()})
+
+	sm.ReceiveFrom(ctx, p, []cid.Cid{block.Cid()}, []cid.Cid{}, []cid.Cid{})
+	if len(firstSession.ks) == 0 ||
+		len(secondSession.ks) > 0 ||
+		len(thirdSession.ks) == 0 {
+		t.Fatal("should have received blocks but didn't")
+	}
+
+	sm.ReceiveFrom(ctx, p, []cid.Cid{}, []cid.Cid{block.Cid()}, []cid.Cid{})
+	if len(firstSession.wantBlocks) == 0 ||
+		len(secondSession.wantBlocks) > 0 ||
+		len(thirdSession.wantBlocks) == 0 {
+		t.Fatal("should have received want-blocks but didn't")
+	}
+
+	sm.ReceiveFrom(ctx, p, []cid.Cid{}, []cid.Cid{}, []cid.Cid{block.Cid()})
+	if len(firstSession.wantHaves) == 0 ||
+		len(secondSession.wantHaves) > 0 ||
+		len(thirdSession.wantHaves) == 0 {
+		t.Fatal("should have received want-haves but didn't")
+	}
+
+	if len(pm.cancelled()) != 1 {
+		t.Fatal("should have sent cancel for received blocks")
 	}
 }

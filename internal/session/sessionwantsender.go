@@ -110,10 +110,11 @@ type sessionWantSender struct {
 	onSend onSendFn
 	// Called when all peers explicitly don't have a block
 	onPeersExhausted onPeersExhaustedFn
+	ttl              int32
 }
 
 func newSessionWantSender(sid uint64, pm PeerManager, spm SessionPeerManager, canceller SessionWantsCanceller,
-	bpm *bsbpm.BlockPresenceManager, onSend onSendFn, onPeersExhausted onPeersExhaustedFn) sessionWantSender {
+	bpm *bsbpm.BlockPresenceManager, onSend onSendFn, onPeersExhausted onPeersExhaustedFn, ttl int32) sessionWantSender {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sws := sessionWantSender{
@@ -133,6 +134,7 @@ func newSessionWantSender(sid uint64, pm PeerManager, spm SessionPeerManager, ca
 		bpm:              bpm,
 		onSend:           onSend,
 		onPeersExhausted: onPeersExhausted,
+		ttl:              ttl,
 	}
 
 	return sws
@@ -585,7 +587,7 @@ func (sws *sessionWantSender) sendWants(sends allWants) {
 		// precedence over want-haves.
 		wblks := snd.wantBlocks.Keys()
 		whaves := snd.wantHaves.Keys()
-		sws.pm.SendWants(sws.ctx, p, wblks, whaves)
+		sws.pm.SendWants(sws.ctx, p, wblks, whaves, sws.ttl)
 
 		// Inform the session that we've sent the wants
 		sws.onSend(p, wblks, whaves)

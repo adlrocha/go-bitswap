@@ -12,8 +12,9 @@ import (
 
 	"github.com/ipfs/go-bitswap/internal/testutil"
 	message "github.com/ipfs/go-bitswap/message"
-	pb "github.com/ipfs/go-bitswap/message/pb"
 
+	bssm "github.com/ipfs/go-bitswap/internal/sessionmanager"
+	pb "github.com/ipfs/go-bitswap/message/pb"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"
@@ -24,14 +25,17 @@ import (
 	libp2ptest "github.com/libp2p/go-libp2p-core/test"
 )
 
+var defaultTTL int32 = 1
+
 type peerTag struct {
 	done  chan struct{}
 	peers map[peer.ID]int
 }
 
 type fakePeerTagger struct {
-	lk   sync.Mutex
-	tags map[string]*peerTag
+	lk             sync.Mutex
+	protectedPeers map[peer.ID]map[string]struct{}
+	tags           map[string]*peerTag
 }
 
 func (fpt *fakePeerTagger) TagPeer(p peer.ID, tag string, n int) {
@@ -97,7 +101,8 @@ func newTestEngine(ctx context.Context, idStr string) engineSet {
 func newTestEngineWithSampling(ctx context.Context, idStr string, peerSampleInterval time.Duration, sampleCh chan struct{}) engineSet {
 	fpt := &fakePeerTagger{}
 	bs := blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore()))
-	e := newEngine(ctx, bs, fpt, "localhost", 0, NewTestScoreLedger(peerSampleInterval, sampleCh))
+	var sm *bssm.SessionManager
+	e := newEngine(ctx, bs, fpt, "localhost", 0, NewTestScoreLedger(peerSampleInterval, sampleCh), sm)
 	e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
 	return engineSet{
 		Peer: peer.ID(idStr),
@@ -185,7 +190,7 @@ func peerIsPartner(p peer.ID, e *Engine) bool {
 func TestOutboxClosedWhenEngineClosed(t *testing.T) {
 	ctx := context.Background()
 	t.SkipNow() // TODO implement *Engine.Close
-	e := newEngine(ctx, blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore())), &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil))
+	e := newEngine(ctx, blockstore.NewBlockstore(dssync.MutexWrap(ds.NewMapDatastore())), &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil), nil)
 	e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -293,7 +298,7 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 				testCaseEntry{
 					wantBlks:     vowels,
 					wantHaves:    "fgh123",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 			},
 			exp: []testCaseExp{
@@ -331,7 +336,7 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 				testCaseEntry{
 					wantBlks:     "aeiou123",
 					wantHaves:    "fgh456",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 			},
 			exp: []testCaseExp{
@@ -399,17 +404,17 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 				testCaseEntry{
 					wantBlks:     "ae12",
 					wantHaves:    "jk5",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 				testCaseEntry{
 					wantBlks:     "io34",
 					wantHaves:    "lm",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 				testCaseEntry{
 					wantBlks:     "u",
 					wantHaves:    "6",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 			},
 			exp: []testCaseExp{
@@ -426,11 +431,11 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 			wls: []testCaseEntry{
 				testCaseEntry{
 					wantBlks:     "a",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 				testCaseEntry{
 					wantHaves:    "a",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 			},
 			// want-have should be ignored because there was already a
@@ -447,11 +452,11 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 			wls: []testCaseEntry{
 				testCaseEntry{
 					wantHaves:    "b",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 				testCaseEntry{
 					wantBlks:     "b",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 			},
 			// want-block should overwrite existing want-have
@@ -467,11 +472,11 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 			wls: []testCaseEntry{
 				testCaseEntry{
 					wantBlks:     "a",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 				testCaseEntry{
 					wantBlks:     "a",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 			},
 			// second want-block should be ignored
@@ -487,11 +492,11 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 			wls: []testCaseEntry{
 				testCaseEntry{
 					wantHaves:    "a",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 				testCaseEntry{
 					wantHaves:    "a",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 			},
 			// second want-have should be ignored
@@ -512,8 +517,8 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 	if len(onlyTestCases) > 0 {
 		testCases = onlyTestCases
 	}
-
-	e := newEngine(context.Background(), bs, &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil))
+	var sm *bssm.SessionManager
+	e := newEngine(context.Background(), bs, &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil), sm)
 	e.StartWorkers(context.Background(), process.WithTeardown(func() error { return nil }))
 	for i, testCase := range testCases {
 		t.Logf("Test case %d:", i)
@@ -572,17 +577,20 @@ func TestPartnerWantHaveWantBlockActive(t *testing.T) {
 		exp  []testCaseExp
 	}
 
+	// TODO: The behavior of DONT_HAVEs is not checked here. The use of TTL removes
+	// the transmission of the DONT_HAVES straight away. An additional test could be added where
+	// messages are sent with TTL=0 so DONT_HAVEs are actually shared.
 	testCases := []testCase{
 		// Send want-block then want-have for same CID
 		testCase{
 			wls: []testCaseEntry{
 				testCaseEntry{
 					wantBlks:     "a",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 				testCaseEntry{
 					wantHaves:    "a",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 			},
 			// want-have should be ignored because there was already a
@@ -599,11 +607,11 @@ func TestPartnerWantHaveWantBlockActive(t *testing.T) {
 			wls: []testCaseEntry{
 				testCaseEntry{
 					wantHaves:    "b",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 				testCaseEntry{
 					wantBlks:     "b",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 			},
 			// want-have is active when want-block is added, so want-have
@@ -623,11 +631,11 @@ func TestPartnerWantHaveWantBlockActive(t *testing.T) {
 			wls: []testCaseEntry{
 				testCaseEntry{
 					wantBlks:     "a",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 				testCaseEntry{
 					wantBlks:     "a",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 			},
 			// second want-block should be ignored
@@ -643,11 +651,11 @@ func TestPartnerWantHaveWantBlockActive(t *testing.T) {
 			wls: []testCaseEntry{
 				testCaseEntry{
 					wantHaves:    "a",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 				testCaseEntry{
 					wantHaves:    "a",
-					sendDontHave: true,
+					sendDontHave: false,
 				},
 			},
 			// second want-have should be ignored
@@ -669,7 +677,8 @@ func TestPartnerWantHaveWantBlockActive(t *testing.T) {
 		testCases = onlyTestCases
 	}
 
-	e := newEngine(context.Background(), bs, &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil))
+	var sm *bssm.SessionManager
+	e := newEngine(context.Background(), bs, &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil), sm)
 	e.StartWorkers(context.Background(), process.WithTeardown(func() error { return nil }))
 
 	var next envChan
@@ -854,7 +863,8 @@ func TestPartnerWantsThenCancels(t *testing.T) {
 	ctx := context.Background()
 	for i := 0; i < numRounds; i++ {
 		expected := make([][]string, 0, len(testcases))
-		e := newEngine(ctx, bs, &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil))
+		var sm *bssm.SessionManager
+		e := newEngine(ctx, bs, &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil), sm)
 		e.StartWorkers(ctx, process.WithTeardown(func() error { return nil }))
 		for _, testcase := range testcases {
 			set := testcase[0]
@@ -879,15 +889,16 @@ func TestSendReceivedBlocksToPeersThatWantThem(t *testing.T) {
 	partner := libp2ptest.RandPeerIDFatal(t)
 	otherPeer := libp2ptest.RandPeerIDFatal(t)
 
-	e := newEngine(context.Background(), bs, &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil))
+	var sm *bssm.SessionManager
+	e := newEngine(context.Background(), bs, &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil), sm)
 	e.StartWorkers(context.Background(), process.WithTeardown(func() error { return nil }))
 
 	blks := testutil.GenerateBlocksOfSize(4, 8*1024)
 	msg := message.New(false)
-	msg.AddEntry(blks[0].Cid(), 4, pb.Message_Wantlist_Have, false)
-	msg.AddEntry(blks[1].Cid(), 3, pb.Message_Wantlist_Have, false)
-	msg.AddEntry(blks[2].Cid(), 2, pb.Message_Wantlist_Block, false)
-	msg.AddEntry(blks[3].Cid(), 1, pb.Message_Wantlist_Block, false)
+	msg.AddEntry(blks[0].Cid(), 4, pb.Message_Wantlist_Have, false, 0)
+	msg.AddEntry(blks[1].Cid(), 3, pb.Message_Wantlist_Have, false, 0)
+	msg.AddEntry(blks[2].Cid(), 2, pb.Message_Wantlist_Block, false, 0)
+	msg.AddEntry(blks[3].Cid(), 1, pb.Message_Wantlist_Block, false, 0)
 	e.MessageReceived(context.Background(), partner, msg)
 
 	// Nothing in blockstore, so shouldn't get any envelope
@@ -923,18 +934,19 @@ func TestSendDontHave(t *testing.T) {
 	partner := libp2ptest.RandPeerIDFatal(t)
 	otherPeer := libp2ptest.RandPeerIDFatal(t)
 
-	e := newEngine(context.Background(), bs, &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil))
+	var sm *bssm.SessionManager
+	e := newEngine(context.Background(), bs, &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil), sm)
 	e.StartWorkers(context.Background(), process.WithTeardown(func() error { return nil }))
 
 	blks := testutil.GenerateBlocksOfSize(4, 8*1024)
 	msg := message.New(false)
-	msg.AddEntry(blks[0].Cid(), 4, pb.Message_Wantlist_Have, false)
-	msg.AddEntry(blks[1].Cid(), 3, pb.Message_Wantlist_Have, true)
-	msg.AddEntry(blks[2].Cid(), 2, pb.Message_Wantlist_Block, false)
-	msg.AddEntry(blks[3].Cid(), 1, pb.Message_Wantlist_Block, true)
+	// Usi ng TTL 0 the behavior of engine should be the same as before.
+	msg.AddEntry(blks[0].Cid(), 4, pb.Message_Wantlist_Have, false, 0)
+	msg.AddEntry(blks[1].Cid(), 3, pb.Message_Wantlist_Have, true, 0)
+	msg.AddEntry(blks[2].Cid(), 2, pb.Message_Wantlist_Block, false, 0)
+	msg.AddEntry(blks[3].Cid(), 1, pb.Message_Wantlist_Block, true, 0)
 	e.MessageReceived(context.Background(), partner, msg)
 
-	// Nothing in blockstore, should get DONT_HAVE for entries that wanted it
 	var next envChan
 	next, env := getNextEnvelope(e, next, 10*time.Millisecond)
 	if env == nil {
@@ -987,18 +999,19 @@ func TestWantlistForPeer(t *testing.T) {
 	partner := libp2ptest.RandPeerIDFatal(t)
 	otherPeer := libp2ptest.RandPeerIDFatal(t)
 
-	e := newEngine(context.Background(), bs, &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil))
+	var sm *bssm.SessionManager
+	e := newEngine(context.Background(), bs, &fakePeerTagger{}, "localhost", 0, NewTestScoreLedger(shortTerm, nil), sm)
 	e.StartWorkers(context.Background(), process.WithTeardown(func() error { return nil }))
 
 	blks := testutil.GenerateBlocksOfSize(4, 8*1024)
 	msg := message.New(false)
-	msg.AddEntry(blks[0].Cid(), 2, pb.Message_Wantlist_Have, false)
-	msg.AddEntry(blks[1].Cid(), 3, pb.Message_Wantlist_Have, false)
+	msg.AddEntry(blks[0].Cid(), 2, pb.Message_Wantlist_Have, false, defaultTTL)
+	msg.AddEntry(blks[1].Cid(), 3, pb.Message_Wantlist_Have, false, defaultTTL)
 	e.MessageReceived(context.Background(), partner, msg)
 
 	msg2 := message.New(false)
-	msg2.AddEntry(blks[2].Cid(), 1, pb.Message_Wantlist_Block, false)
-	msg2.AddEntry(blks[3].Cid(), 4, pb.Message_Wantlist_Block, false)
+	msg2.AddEntry(blks[2].Cid(), 1, pb.Message_Wantlist_Block, false, defaultTTL)
+	msg2.AddEntry(blks[3].Cid(), 4, pb.Message_Wantlist_Block, false, defaultTTL)
 	e.MessageReceived(context.Background(), partner, msg2)
 
 	entries := e.WantlistForPeer(otherPeer)
@@ -1103,7 +1116,7 @@ func partnerWantBlocks(e *Engine, keys []string, partner peer.ID) {
 	add := message.New(false)
 	for i, letter := range keys {
 		block := blocks.NewBlock([]byte(letter))
-		add.AddEntry(block.Cid(), int32(len(keys)-i), pb.Message_Wantlist_Block, true)
+		add.AddEntry(block.Cid(), int32(len(keys)-i), pb.Message_Wantlist_Block, true, defaultTTL)
 	}
 	e.MessageReceived(context.Background(), partner, add)
 }
@@ -1113,12 +1126,12 @@ func partnerWantBlocksHaves(e *Engine, keys []string, wantHaves []string, sendDo
 	priority := int32(len(wantHaves) + len(keys))
 	for _, letter := range wantHaves {
 		block := blocks.NewBlock([]byte(letter))
-		add.AddEntry(block.Cid(), priority, pb.Message_Wantlist_Have, sendDontHave)
+		add.AddEntry(block.Cid(), priority, pb.Message_Wantlist_Have, sendDontHave, defaultTTL)
 		priority--
 	}
 	for _, letter := range keys {
 		block := blocks.NewBlock([]byte(letter))
-		add.AddEntry(block.Cid(), priority, pb.Message_Wantlist_Block, sendDontHave)
+		add.AddEntry(block.Cid(), priority, pb.Message_Wantlist_Block, sendDontHave, defaultTTL)
 		priority--
 	}
 	e.MessageReceived(context.Background(), partner, add)

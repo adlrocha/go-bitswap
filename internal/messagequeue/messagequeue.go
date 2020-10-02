@@ -97,6 +97,7 @@ type MessageQueue struct {
 	// For performance reasons we just clear out the fields of the message
 	// instead of creating a new one every time.
 	msg bsmsg.BitSwapMessage
+	ttl int32
 }
 
 // recallWantlist keeps a list of pending wants and a list of sent wants
@@ -206,13 +207,13 @@ type DontHaveTimeoutManager interface {
 }
 
 // New creates a new MessageQueue.
-func New(ctx context.Context, p peer.ID, network MessageNetwork, onDontHaveTimeout OnDontHaveTimeout) *MessageQueue {
+func New(ctx context.Context, p peer.ID, network MessageNetwork, onDontHaveTimeout OnDontHaveTimeout, ttl int32) *MessageQueue {
 	onTimeout := func(ks []cid.Cid) {
 		log.Infow("Bitswap: timeout waiting for blocks", "cids", ks, "peer", p)
 		onDontHaveTimeout(p, ks)
 	}
 	dhTimeoutMgr := newDontHaveTimeoutMgr(newPeerConnection(p, network), onTimeout)
-	return newMessageQueue(ctx, p, network, maxMessageSize, sendErrorBackoff, maxValidLatency, dhTimeoutMgr)
+	return newMessageQueue(ctx, p, network, maxMessageSize, sendErrorBackoff, maxValidLatency, dhTimeoutMgr, ttl)
 }
 
 // This constructor is used by the tests
@@ -223,7 +224,8 @@ func newMessageQueue(
 	maxMsgSize int,
 	sendErrorBackoff time.Duration,
 	maxValidLatency time.Duration,
-	dhTimeoutMgr DontHaveTimeoutManager) *MessageQueue {
+	dhTimeoutMgr DontHaveTimeoutManager,
+	ttl int32) *MessageQueue {
 
 	ctx, cancel := context.WithCancel(ctx)
 	return &MessageQueue{
@@ -245,11 +247,12 @@ func newMessageQueue(
 		// For performance reasons we just clear out the fields of the message
 		// after using it, instead of creating a new one every time.
 		msg: bsmsg.New(false),
+		ttl: ttl,
 	}
 }
 
 // Add want-haves that are part of a broadcast to all connected peers
-func (mq *MessageQueue) AddBroadcastWantHaves(wantHaves []cid.Cid) {
+func (mq *MessageQueue) AddBroadcastWantHaves(wantHaves []cid.Cid, ttl int32) {
 	if len(wantHaves) == 0 {
 		return
 	}
@@ -258,7 +261,7 @@ func (mq *MessageQueue) AddBroadcastWantHaves(wantHaves []cid.Cid) {
 	defer mq.wllock.Unlock()
 
 	for _, c := range wantHaves {
-		mq.bcstWants.Add(c, mq.priority, pb.Message_Wantlist_Have)
+		mq.bcstWants.Add(c, mq.priority, pb.Message_Wantlist_Have, ttl)
 		mq.priority--
 
 		// We're adding a want-have for the cid, so clear any pending cancel
@@ -271,7 +274,7 @@ func (mq *MessageQueue) AddBroadcastWantHaves(wantHaves []cid.Cid) {
 }
 
 // Add want-haves and want-blocks for the peer for this message queue.
-func (mq *MessageQueue) AddWants(wantBlocks []cid.Cid, wantHaves []cid.Cid) {
+func (mq *MessageQueue) AddWants(wantBlocks []cid.Cid, wantHaves []cid.Cid, ttl int32) {
 	if len(wantBlocks) == 0 && len(wantHaves) == 0 {
 		return
 	}
@@ -280,7 +283,7 @@ func (mq *MessageQueue) AddWants(wantBlocks []cid.Cid, wantHaves []cid.Cid) {
 	defer mq.wllock.Unlock()
 
 	for _, c := range wantHaves {
-		mq.peerWants.Add(c, mq.priority, pb.Message_Wantlist_Have)
+		mq.peerWants.Add(c, mq.priority, pb.Message_Wantlist_Have, ttl)
 		mq.priority--
 
 		// We're adding a want-have for the cid, so clear any pending cancel
@@ -288,7 +291,7 @@ func (mq *MessageQueue) AddWants(wantBlocks []cid.Cid, wantHaves []cid.Cid) {
 		mq.cancels.Remove(c)
 	}
 	for _, c := range wantBlocks {
-		mq.peerWants.Add(c, mq.priority, pb.Message_Wantlist_Block)
+		mq.peerWants.Add(c, mq.priority, pb.Message_Wantlist_Block, ttl)
 		mq.priority--
 
 		// We're adding a want-block for the cid, so clear any pending cancel
@@ -640,6 +643,7 @@ func (mq *MessageQueue) logOutgoingMessage(wantlist []bsmsg.Entry) {
 					"cid", e.Cid,
 					"local", self,
 					"to", mq.p,
+					"ttl", e.TTL,
 				)
 			} else {
 				log.Debugw("sent message",
@@ -647,6 +651,7 @@ func (mq *MessageQueue) logOutgoingMessage(wantlist []bsmsg.Entry) {
 					"cid", e.Cid,
 					"local", self,
 					"to", mq.p,
+					"ttl", e.TTL,
 				)
 			}
 		}
@@ -724,7 +729,7 @@ func (mq *MessageQueue) extractOutgoingMessage(supportsHave bool) (bsmsg.BitSwap
 	}
 
 	for _, e := range peerEntries {
-		msgSize += mq.msg.AddEntry(e.Cid, e.Priority, e.WantType, true)
+		msgSize += mq.msg.AddEntry(e.Cid, e.Priority, e.WantType, true, e.TTL)
 		sentPeerEntries++
 
 		if msgSize >= mq.maxMessageSize {
@@ -748,7 +753,7 @@ func (mq *MessageQueue) extractOutgoingMessage(supportsHave bool) (bsmsg.BitSwap
 			wantType = pb.Message_Wantlist_Block
 		}
 
-		msgSize += mq.msg.AddEntry(e.Cid, e.Priority, wantType, false)
+		msgSize += mq.msg.AddEntry(e.Cid, e.Priority, wantType, false, e.TTL)
 		sentBcstEntries++
 
 		if msgSize >= mq.maxMessageSize {

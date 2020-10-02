@@ -8,6 +8,8 @@ import (
 	peer "github.com/libp2p/go-libp2p-core/peer"
 )
 
+var defaultTTL int32 = 1
+
 type gauge struct {
 	count int
 }
@@ -17,6 +19,16 @@ func (g *gauge) Inc() {
 }
 func (g *gauge) Dec() {
 	g.count--
+}
+
+// TODO: If we want to be strict with the test we should not only
+// test that CIDs are added to the queue with the right TTL.
+// We can use a similar structure to this one to perform
+// these tests (I am not going to approach them right now as I don't
+// think it adds a lot of value to the implementation).
+type mockWant struct {
+	c   cid.Cid
+	ttl int32
 }
 
 type mockPQ struct {
@@ -36,10 +48,10 @@ func (mpq *mockPQ) clear() {
 func (mpq *mockPQ) Startup()  {}
 func (mpq *mockPQ) Shutdown() {}
 
-func (mpq *mockPQ) AddBroadcastWantHaves(whs []cid.Cid) {
+func (mpq *mockPQ) AddBroadcastWantHaves(whs []cid.Cid, ttl int32) {
 	mpq.bcst = append(mpq.bcst, whs...)
 }
-func (mpq *mockPQ) AddWants(wbs []cid.Cid, whs []cid.Cid) {
+func (mpq *mockPQ) AddWants(wbs []cid.Cid, whs []cid.Cid, ttl int32) {
 	mpq.wbs = append(mpq.wbs, wbs...)
 	mpq.whs = append(mpq.whs, whs...)
 }
@@ -78,14 +90,14 @@ func TestPWMBroadcastWantHaves(t *testing.T) {
 	for _, p := range peers[:2] {
 		pq := &mockPQ{}
 		peerQueues[p] = pq
-		pwm.addPeer(pq, p)
+		pwm.addPeer(pq, p, defaultTTL)
 		if len(pq.bcst) > 0 {
 			t.Errorf("expected no broadcast wants")
 		}
 	}
 
 	// Broadcast 2 cids to 2 peers
-	pwm.broadcastWantHaves(cids)
+	pwm.broadcastWantHaves(cids, defaultTTL)
 	for _, pqi := range peerQueues {
 		pq := pqi.(*mockPQ)
 		if len(pq.bcst) != 2 {
@@ -98,7 +110,7 @@ func TestPWMBroadcastWantHaves(t *testing.T) {
 
 	// Broadcasting same cids should have no effect
 	clearSent(peerQueues)
-	pwm.broadcastWantHaves(cids)
+	pwm.broadcastWantHaves(cids, defaultTTL)
 	for _, pqi := range peerQueues {
 		pq := pqi.(*mockPQ)
 		if len(pq.bcst) != 0 {
@@ -108,7 +120,7 @@ func TestPWMBroadcastWantHaves(t *testing.T) {
 
 	// Broadcast 2 other cids
 	clearSent(peerQueues)
-	pwm.broadcastWantHaves(cids2)
+	pwm.broadcastWantHaves(cids2, defaultTTL)
 	for _, pqi := range peerQueues {
 		pq := pqi.(*mockPQ)
 		if len(pq.bcst) != 2 {
@@ -121,7 +133,7 @@ func TestPWMBroadcastWantHaves(t *testing.T) {
 
 	// Broadcast mix of old and new cids
 	clearSent(peerQueues)
-	pwm.broadcastWantHaves(append(cids, cids3...))
+	pwm.broadcastWantHaves(append(cids, cids3...), defaultTTL)
 	for _, pqi := range peerQueues {
 		pq := pqi.(*mockPQ)
 		if len(pq.bcst) != 2 {
@@ -139,9 +151,9 @@ func TestPWMBroadcastWantHaves(t *testing.T) {
 	wantBlocks := []cid.Cid{cids4[0], cids4[2]}
 	p0 := peers[0]
 	p1 := peers[1]
-	pwm.sendWants(p0, wantBlocks, []cid.Cid{})
+	pwm.sendWants(p0, wantBlocks, []cid.Cid{}, defaultTTL)
 
-	pwm.broadcastWantHaves(cids4)
+	pwm.broadcastWantHaves(cids4, defaultTTL)
 	pq0 := peerQueues[p0].(*mockPQ)
 	if len(pq0.bcst) != 2 { // only broadcast 2 / 4 want-haves
 		t.Fatal("Expected 2 want-haves")
@@ -166,13 +178,13 @@ func TestPWMBroadcastWantHaves(t *testing.T) {
 	peer2 := peers[2]
 	pq2 := &mockPQ{}
 	peerQueues[peer2] = pq2
-	pwm.addPeer(pq2, peer2)
+	pwm.addPeer(pq2, peer2, defaultTTL)
 	if !testutil.MatchKeysIgnoreOrder(pq2.bcst, allCids) {
 		t.Fatalf("Expected all cids to be broadcast.")
 	}
 
 	clearSent(peerQueues)
-	pwm.broadcastWantHaves(allCids)
+	pwm.broadcastWantHaves(allCids, defaultTTL)
 	if len(pq2.bcst) != 0 {
 		t.Errorf("did not expect to have CIDs to broadcast")
 	}
@@ -191,14 +203,14 @@ func TestPWMSendWants(t *testing.T) {
 	for _, p := range peers[:2] {
 		pq := &mockPQ{}
 		peerQueues[p] = pq
-		pwm.addPeer(pq, p)
+		pwm.addPeer(pq, p, defaultTTL)
 	}
 	pq0 := peerQueues[p0].(*mockPQ)
 	pq1 := peerQueues[p1].(*mockPQ)
 
 	// Send 2 want-blocks and 2 want-haves to p0
 	clearSent(peerQueues)
-	pwm.sendWants(p0, cids, cids2)
+	pwm.sendWants(p0, cids, cids2, defaultTTL)
 	if !testutil.MatchKeysIgnoreOrder(pq0.wbs, cids) {
 		t.Fatal("Expected 2 want-blocks")
 	}
@@ -212,7 +224,7 @@ func TestPWMSendWants(t *testing.T) {
 	clearSent(peerQueues)
 	cids3 := testutil.GenerateCids(2)
 	cids4 := testutil.GenerateCids(2)
-	pwm.sendWants(p0, append(cids3, cids[0]), append(cids4, cids2[0]))
+	pwm.sendWants(p0, append(cids3, cids[0]), append(cids4, cids2[0]), defaultTTL)
 	if !testutil.MatchKeysIgnoreOrder(pq0.wbs, cids3) {
 		t.Fatal("Expected 2 want-blocks")
 	}
@@ -224,7 +236,7 @@ func TestPWMSendWants(t *testing.T) {
 	clearSent(peerQueues)
 	cids5 := testutil.GenerateCids(1)
 	newWantBlockOldWantHave := append(cids5, cids2[0])
-	pwm.sendWants(p0, newWantBlockOldWantHave, []cid.Cid{})
+	pwm.sendWants(p0, newWantBlockOldWantHave, []cid.Cid{}, defaultTTL)
 	// If a want was sent as a want-have, it should be ok to now send it as a
 	// want-block
 	if !testutil.MatchKeysIgnoreOrder(pq0.wbs, newWantBlockOldWantHave) {
@@ -238,7 +250,7 @@ func TestPWMSendWants(t *testing.T) {
 	clearSent(peerQueues)
 	cids6 := testutil.GenerateCids(1)
 	newWantHaveOldWantBlock := append(cids6, cids[0])
-	pwm.sendWants(p0, []cid.Cid{}, newWantHaveOldWantBlock)
+	pwm.sendWants(p0, []cid.Cid{}, newWantHaveOldWantBlock, defaultTTL)
 	// If a want was previously sent as a want-block, it should not be
 	// possible to now send it as a want-have
 	if !testutil.MatchKeysIgnoreOrder(pq0.whs, cids6) {
@@ -249,7 +261,7 @@ func TestPWMSendWants(t *testing.T) {
 	}
 
 	// Send 2 want-blocks and 2 want-haves to p1
-	pwm.sendWants(p1, cids, cids2)
+	pwm.sendWants(p1, cids, cids2, defaultTTL)
 	if !testutil.MatchKeysIgnoreOrder(pq1.wbs, cids) {
 		t.Fatal("Expected 2 want-blocks")
 	}
@@ -275,16 +287,16 @@ func TestPWMSendCancels(t *testing.T) {
 	for _, p := range peers[:2] {
 		pq := &mockPQ{}
 		peerQueues[p] = pq
-		pwm.addPeer(pq, p)
+		pwm.addPeer(pq, p, defaultTTL)
 	}
 	pq0 := peerQueues[p0].(*mockPQ)
 	pq1 := peerQueues[p1].(*mockPQ)
 
 	// Send 2 want-blocks and 2 want-haves to p0
-	pwm.sendWants(p0, wb1, wh1)
+	pwm.sendWants(p0, wb1, wh1, defaultTTL)
 	// Send 3 want-blocks and 3 want-haves to p1
 	// (1 overlapping want-block / want-have with p0)
-	pwm.sendWants(p1, append(wb2, wb1[1]), append(wh2, wh1[1]))
+	pwm.sendWants(p1, append(wb2, wb1[1]), append(wh2, wh1[1]), defaultTTL)
 
 	if !testutil.MatchKeysIgnoreOrder(pwm.getWantBlocks(), allwb) {
 		t.Fatal("Expected 4 cids to be wanted")
@@ -350,10 +362,10 @@ func TestStats(t *testing.T) {
 	peerQueues := make(map[peer.ID]PeerQueue)
 	pq := &mockPQ{}
 	peerQueues[p0] = pq
-	pwm.addPeer(pq, p0)
+	pwm.addPeer(pq, p0, defaultTTL)
 
 	// Send 2 want-blocks and 2 want-haves to p0
-	pwm.sendWants(p0, cids, cids2)
+	pwm.sendWants(p0, cids, cids2, defaultTTL)
 
 	if g.count != 4 {
 		t.Fatal("Expected 4 wants")
@@ -364,7 +376,7 @@ func TestStats(t *testing.T) {
 
 	// Send 1 old want-block and 2 new want-blocks to p0
 	cids3 := testutil.GenerateCids(2)
-	pwm.sendWants(p0, append(cids3, cids[0]), []cid.Cid{})
+	pwm.sendWants(p0, append(cids3, cids[0]), []cid.Cid{}, defaultTTL)
 
 	if g.count != 6 {
 		t.Fatal("Expected 6 wants")
@@ -375,7 +387,7 @@ func TestStats(t *testing.T) {
 
 	// Broadcast 1 old want-have and 2 new want-haves
 	cids4 := testutil.GenerateCids(2)
-	pwm.broadcastWantHaves(append(cids4, cids2[0]))
+	pwm.broadcastWantHaves(append(cids4, cids2[0]), defaultTTL)
 	if g.count != 8 {
 		t.Fatal("Expected 8 wants")
 	}
@@ -384,7 +396,7 @@ func TestStats(t *testing.T) {
 	}
 
 	// Add a second peer
-	pwm.addPeer(pq, p1)
+	pwm.addPeer(pq, p1, defaultTTL)
 
 	if g.count != 8 {
 		t.Fatal("Expected 8 wants")
@@ -448,15 +460,15 @@ func TestStatsOverlappingWantBlockWantHave(t *testing.T) {
 	cids := testutil.GenerateCids(2)
 	cids2 := testutil.GenerateCids(2)
 
-	pwm.addPeer(&mockPQ{}, p0)
-	pwm.addPeer(&mockPQ{}, p1)
+	pwm.addPeer(&mockPQ{}, p0, defaultTTL)
+	pwm.addPeer(&mockPQ{}, p1, defaultTTL)
 
 	// Send 2 want-blocks and 2 want-haves to p0
-	pwm.sendWants(p0, cids, cids2)
+	pwm.sendWants(p0, cids, cids2, defaultTTL)
 
 	// Send opposite:
 	// 2 want-haves and 2 want-blocks to p1
-	pwm.sendWants(p1, cids2, cids)
+	pwm.sendWants(p1, cids2, cids, defaultTTL)
 
 	if g.count != 4 {
 		t.Fatal("Expected 4 wants")
@@ -487,15 +499,15 @@ func TestStatsRemovePeerOverlappingWantBlockWantHave(t *testing.T) {
 	cids := testutil.GenerateCids(2)
 	cids2 := testutil.GenerateCids(2)
 
-	pwm.addPeer(&mockPQ{}, p0)
-	pwm.addPeer(&mockPQ{}, p1)
+	pwm.addPeer(&mockPQ{}, p0, defaultTTL)
+	pwm.addPeer(&mockPQ{}, p1, defaultTTL)
 
 	// Send 2 want-blocks and 2 want-haves to p0
-	pwm.sendWants(p0, cids, cids2)
+	pwm.sendWants(p0, cids, cids2, defaultTTL)
 
 	// Send opposite:
 	// 2 want-haves and 2 want-blocks to p1
-	pwm.sendWants(p1, cids2, cids)
+	pwm.sendWants(p1, cids2, cids, defaultTTL)
 
 	if g.count != 4 {
 		t.Fatal("Expected 4 wants")

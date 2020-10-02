@@ -22,7 +22,8 @@ var log = logging.Logger("bs:sess")
 var sflog = log.Desugar()
 
 const (
-	broadcastLiveWantsLimit = 64
+	broadcastLiveWantsLimit       = 64
+	defaultTTL              int32 = 1
 )
 
 // PeerManager keeps track of which sessions are interested in which peers
@@ -35,10 +36,10 @@ type PeerManager interface {
 	// interested in a peer's connection state
 	UnregisterSession(uint64)
 	// SendWants tells the PeerManager to send wants to the given peer
-	SendWants(ctx context.Context, peerId peer.ID, wantBlocks []cid.Cid, wantHaves []cid.Cid)
+	SendWants(ctx context.Context, peerId peer.ID, wantBlocks []cid.Cid, wantHaves []cid.Cid, ttl int32)
 	// BroadcastWantHaves sends want-haves to all connected peers (used for
 	// session discovery)
-	BroadcastWantHaves(context.Context, []cid.Cid)
+	BroadcastWantHaves(context.Context, []cid.Cid, int32)
 	// SendCancels tells the PeerManager to send cancels to all peers
 	SendCancels(context.Context, []cid.Cid)
 }
@@ -132,6 +133,10 @@ type Session struct {
 	id    uint64
 
 	self peer.ID
+
+	// Used to implement indirect sessions for ttl
+	ttl      int32
+	indirect bool // Determines if the session is indirect (so blocks are not stored).
 }
 
 // New creates a new bitswap session whose lifetime is bounded by the
@@ -148,7 +153,9 @@ func New(
 	notif notifications.PubSub,
 	initialSearchDelay time.Duration,
 	periodicSearchDelay delay.D,
-	self peer.ID) *Session {
+	self peer.ID,
+	ttl int32,
+	indirect bool) *Session {
 
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Session{
@@ -170,8 +177,10 @@ func New(
 		initialSearchDelay:  initialSearchDelay,
 		periodicSearchDelay: periodicSearchDelay,
 		self:                self,
+		ttl:                 ttl,
+		indirect:            indirect,
 	}
-	s.sws = newSessionWantSender(id, pm, sprm, sm, bpm, s.onWantsSent, s.onPeersExhausted)
+	s.sws = newSessionWantSender(id, pm, sprm, sm, bpm, s.onWantsSent, s.onPeersExhausted, s.ttl)
 
 	go s.run(ctx)
 
@@ -486,7 +495,7 @@ func (s *Session) wantBlocks(ctx context.Context, newks []cid.Cid) {
 // Send want-haves to all connected peers
 func (s *Session) broadcastWantHaves(ctx context.Context, wants []cid.Cid) {
 	log.Debugw("broadcastWantHaves", "session", s.id, "cids", wants)
-	s.pm.BroadcastWantHaves(ctx, wants)
+	s.pm.BroadcastWantHaves(ctx, wants, s.ttl)
 }
 
 // The session will broadcast if it has outstanding wants and doesn't receive

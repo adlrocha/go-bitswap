@@ -22,15 +22,16 @@ type msg struct {
 type mockPeerQueue struct {
 	p    peer.ID
 	msgs chan msg
+	ttl  int32
 }
 
 func (fp *mockPeerQueue) Startup()  {}
 func (fp *mockPeerQueue) Shutdown() {}
 
-func (fp *mockPeerQueue) AddBroadcastWantHaves(whs []cid.Cid) {
+func (fp *mockPeerQueue) AddBroadcastWantHaves(whs []cid.Cid, ttl int32) {
 	fp.msgs <- msg{fp.p, nil, whs, nil}
 }
-func (fp *mockPeerQueue) AddWants(wbs []cid.Cid, whs []cid.Cid) {
+func (fp *mockPeerQueue) AddWants(wbs []cid.Cid, whs []cid.Cid, ttl int32) {
 	fp.msgs <- msg{fp.p, wbs, whs, nil}
 }
 func (fp *mockPeerQueue) AddCancels(cs []cid.Cid) {
@@ -68,10 +69,11 @@ func collectMessages(ch chan msg, timeout time.Duration) map[peer.ID]peerWants {
 }
 
 func makePeerQueueFactory(msgs chan msg) PeerQueueFactory {
-	return func(ctx context.Context, p peer.ID) PeerQueue {
+	return func(ctx context.Context, p peer.ID, ttl int32) PeerQueue {
 		return &mockPeerQueue{
 			p:    p,
 			msgs: msgs,
+			ttl:  ttl,
 		}
 	}
 }
@@ -85,9 +87,9 @@ func TestAddingAndRemovingPeers(t *testing.T) {
 	self, peer1, peer2, peer3, peer4, peer5 := tp[0], tp[1], tp[2], tp[3], tp[4], tp[5]
 	peerManager := New(ctx, peerQueueFactory, self)
 
-	peerManager.Connected(peer1)
-	peerManager.Connected(peer2)
-	peerManager.Connected(peer3)
+	peerManager.Connected(peer1, defaultTTL)
+	peerManager.Connected(peer2, defaultTTL)
+	peerManager.Connected(peer3, defaultTTL)
 
 	connectedPeers := peerManager.ConnectedPeers()
 
@@ -111,7 +113,7 @@ func TestAddingAndRemovingPeers(t *testing.T) {
 	}
 
 	// reconnect peer
-	peerManager.Connected(peer1)
+	peerManager.Connected(peer1, defaultTTL)
 	connectedPeers = peerManager.ConnectedPeers()
 
 	if !testutil.ContainsPeer(connectedPeers, peer1) {
@@ -129,10 +131,10 @@ func TestBroadcastOnConnect(t *testing.T) {
 	peerManager := New(ctx, peerQueueFactory, self)
 
 	cids := testutil.GenerateCids(2)
-	peerManager.BroadcastWantHaves(ctx, cids)
+	peerManager.BroadcastWantHaves(ctx, cids, defaultTTL)
 
 	// Connect with two broadcast wants for first peer
-	peerManager.Connected(peer1)
+	peerManager.Connected(peer1, defaultTTL)
 	collected := collectMessages(msgs, 2*time.Millisecond)
 
 	if len(collected[peer1].wantHaves) != 2 {
@@ -152,10 +154,10 @@ func TestBroadcastWantHaves(t *testing.T) {
 	cids := testutil.GenerateCids(3)
 
 	// Broadcast the first two.
-	peerManager.BroadcastWantHaves(ctx, cids[:2])
+	peerManager.BroadcastWantHaves(ctx, cids[:2], defaultTTL)
 
 	// First peer should get them.
-	peerManager.Connected(peer1)
+	peerManager.Connected(peer1, defaultTTL)
 	collected := collectMessages(msgs, 2*time.Millisecond)
 
 	if len(collected[peer1].wantHaves) != 2 {
@@ -163,11 +165,11 @@ func TestBroadcastWantHaves(t *testing.T) {
 	}
 
 	// Connect to second peer
-	peerManager.Connected(peer2)
+	peerManager.Connected(peer2, defaultTTL)
 
 	// Send a broadcast to all peers, including cid that was already sent to
 	// first peer
-	peerManager.BroadcastWantHaves(ctx, []cid.Cid{cids[0], cids[2]})
+	peerManager.BroadcastWantHaves(ctx, []cid.Cid{cids[0], cids[2]}, defaultTTL)
 	collected = collectMessages(msgs, 2*time.Millisecond)
 
 	// One of the want-haves was already sent to peer1
@@ -191,8 +193,8 @@ func TestSendWants(t *testing.T) {
 	peerManager := New(ctx, peerQueueFactory, self)
 	cids := testutil.GenerateCids(4)
 
-	peerManager.Connected(peer1)
-	peerManager.SendWants(ctx, peer1, []cid.Cid{cids[0]}, []cid.Cid{cids[2]})
+	peerManager.Connected(peer1, defaultTTL)
+	peerManager.SendWants(ctx, peer1, []cid.Cid{cids[0]}, []cid.Cid{cids[2]}, defaultTTL)
 	collected := collectMessages(msgs, 2*time.Millisecond)
 
 	if len(collected[peer1].wantHaves) != 1 {
@@ -202,7 +204,7 @@ func TestSendWants(t *testing.T) {
 		t.Fatal("Expected want-block to be sent to peer")
 	}
 
-	peerManager.SendWants(ctx, peer1, []cid.Cid{cids[0], cids[1]}, []cid.Cid{cids[2], cids[3]})
+	peerManager.SendWants(ctx, peer1, []cid.Cid{cids[0], cids[1]}, []cid.Cid{cids[2], cids[3]}, defaultTTL)
 	collected = collectMessages(msgs, 2*time.Millisecond)
 
 	// First want-have and want-block should be filtered (because they were
@@ -226,11 +228,11 @@ func TestSendCancels(t *testing.T) {
 	cids := testutil.GenerateCids(4)
 
 	// Connect to peer1 and peer2
-	peerManager.Connected(peer1)
-	peerManager.Connected(peer2)
+	peerManager.Connected(peer1, defaultTTL)
+	peerManager.Connected(peer2, defaultTTL)
 
 	// Send 2 want-blocks and 1 want-have to peer1
-	peerManager.SendWants(ctx, peer1, []cid.Cid{cids[0], cids[1]}, []cid.Cid{cids[2]})
+	peerManager.SendWants(ctx, peer1, []cid.Cid{cids[0], cids[1]}, []cid.Cid{cids[2]}, defaultTTL)
 
 	// Clear messages
 	collectMessages(msgs, 2*time.Millisecond)
@@ -295,11 +297,11 @@ func TestSessionRegistration(t *testing.T) {
 		t.Fatal("Expected peer not be available till connected")
 	}
 
-	peerManager.Connected(p1)
+	peerManager.Connected(p1, defaultTTL)
 	if !s.available[p1] {
 		t.Fatal("Expected signal callback")
 	}
-	peerManager.Connected(p2)
+	peerManager.Connected(p2, defaultTTL)
 	if !s.available[p2] {
 		t.Fatal("Expected signal callback")
 	}
@@ -314,7 +316,7 @@ func TestSessionRegistration(t *testing.T) {
 
 	peerManager.UnregisterSession(id)
 
-	peerManager.Connected(p1)
+	peerManager.Connected(p1, defaultTTL)
 	if s.available[p1] {
 		t.Fatal("Expected no signal callback (session unregistered)")
 	}
@@ -326,10 +328,10 @@ type benchPeerQueue struct {
 func (*benchPeerQueue) Startup()  {}
 func (*benchPeerQueue) Shutdown() {}
 
-func (*benchPeerQueue) AddBroadcastWantHaves(whs []cid.Cid)   {}
-func (*benchPeerQueue) AddWants(wbs []cid.Cid, whs []cid.Cid) {}
-func (*benchPeerQueue) AddCancels(cs []cid.Cid)               {}
-func (*benchPeerQueue) ResponseReceived(ks []cid.Cid)         {}
+func (*benchPeerQueue) AddBroadcastWantHaves(whs []cid.Cid, ttl int32)   {}
+func (*benchPeerQueue) AddWants(wbs []cid.Cid, whs []cid.Cid, ttl int32) {}
+func (*benchPeerQueue) AddCancels(cs []cid.Cid)                          {}
+func (*benchPeerQueue) ResponseReceived(ks []cid.Cid)                    {}
 
 // Simplistic benchmark to allow us to stress test
 func BenchmarkPeerManager(b *testing.B) {
@@ -337,7 +339,7 @@ func BenchmarkPeerManager(b *testing.B) {
 
 	ctx := context.Background()
 
-	peerQueueFactory := func(ctx context.Context, p peer.ID) PeerQueue {
+	peerQueueFactory := func(ctx context.Context, p peer.ID, ttl int32) PeerQueue {
 		return &benchPeerQueue{}
 	}
 
@@ -348,7 +350,7 @@ func BenchmarkPeerManager(b *testing.B) {
 	// Create a bunch of connections
 	connected := 0
 	for i := 0; i < len(peers); i++ {
-		peerManager.Connected(peers[i])
+		peerManager.Connected(peers[i], defaultTTL)
 		connected++
 	}
 
@@ -363,11 +365,11 @@ func BenchmarkPeerManager(b *testing.B) {
 		r := rand.Intn(8)
 		if r == 0 {
 			wants := testutil.GenerateCids(10)
-			peerManager.SendWants(ctx, peers[i], wants[:2], wants[2:])
+			peerManager.SendWants(ctx, peers[i], wants[:2], wants[2:], defaultTTL)
 			wanted = append(wanted, wants...)
 		} else if r == 1 {
 			wants := testutil.GenerateCids(30)
-			peerManager.BroadcastWantHaves(ctx, wants)
+			peerManager.BroadcastWantHaves(ctx, wants, defaultTTL)
 			wanted = append(wanted, wants...)
 		} else {
 			limit := len(wanted) / 10
