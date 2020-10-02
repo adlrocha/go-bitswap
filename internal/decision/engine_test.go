@@ -298,7 +298,7 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 				testCaseEntry{
 					wantBlks:     vowels,
 					wantHaves:    "fgh123",
-					sendDontHave: false,
+					sendDontHave: true,
 				},
 			},
 			exp: []testCaseExp{
@@ -317,7 +317,7 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 				testCaseEntry{
 					wantBlks:     "aeiou123",
 					wantHaves:    "fgh456",
-					sendDontHave: false,
+					sendDontHave: true,
 				},
 			},
 			exp: []testCaseExp{
@@ -357,11 +357,11 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 				},
 				testCaseEntry{
 					wantBlks:     "io",
-					sendDontHave: false,
+					sendDontHave: true,
 				},
 				testCaseEntry{
 					wantBlks:     "u",
-					sendDontHave: false,
+					sendDontHave: true,
 				},
 			},
 			exp: []testCaseExp{
@@ -386,7 +386,7 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 				},
 				testCaseEntry{
 					wantBlks:     "u",
-					sendDontHave: false,
+					sendDontHave: true,
 				},
 			},
 			exp: []testCaseExp{
@@ -414,7 +414,7 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 				testCaseEntry{
 					wantBlks:     "u",
 					wantHaves:    "6",
-					sendDontHave: false,
+					sendDontHave: true,
 				},
 			},
 			exp: []testCaseExp{
@@ -435,7 +435,7 @@ func TestPartnerWantHaveWantBlockNonActive(t *testing.T) {
 				},
 				testCaseEntry{
 					wantHaves:    "a",
-					sendDontHave: false,
+					sendDontHave: true,
 				},
 			},
 			// want-have should be ignored because there was already a
@@ -577,9 +577,6 @@ func TestPartnerWantHaveWantBlockActive(t *testing.T) {
 		exp  []testCaseExp
 	}
 
-	// TODO: The behavior of DONT_HAVEs is not checked here. The use of TTL removes
-	// the transmission of the DONT_HAVES straight away. An additional test could be added where
-	// messages are sent with TTL=0 so DONT_HAVEs are actually shared.
 	testCases := []testCase{
 		// Send want-block then want-have for same CID
 		testCase{
