@@ -615,7 +615,7 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 	// Start an indirect session for each of the wants with pending TTL
 	for ttl, obs := range indirectKs.t {
 		for priority, keys := range obs {
-			log.Debugf("Starting indirectSession %v, %d, %d", keys, ttl, priority)
+			log.Debugf("Starting indirectSession %v, %v, %d, %d", p, keys, ttl-1, priority)
 			e.startIndirectSession(ctx, p, keys, ttl-1, priority)
 		}
 	}
