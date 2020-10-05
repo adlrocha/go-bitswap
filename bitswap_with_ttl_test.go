@@ -259,7 +259,7 @@ func TestIndirectRealNet(t *testing.T) {
 	}
 	// Second peer broadcasts want for block CID
 	// (Received by first and third peers)
-	blk, err := node4.GetBlock(ctx, blks[0].Cid())
+	_, err := node4.GetBlock(ctx, blks[0].Cid())
 	if err != nil {
 		t.Fatal(err)
 	}
