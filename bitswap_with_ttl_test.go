@@ -269,3 +269,92 @@ func TestIndirectRealNet(t *testing.T) {
 	h3.Close()
 	h4.Close()
 }
+
+func SetupConnections(ctx context.Context, self host.Host, others []host.Host) error {
+	for _, h := range others {
+		if err := self.Connect(ctx, *host.InfoFromHost(h)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func TestComplexTopology(t *testing.T) {
+	logging.SetLogLevel("engine", "DEBUG")
+	logging.SetLogLevel("bitswap", "DEBUG")
+
+	var ttl int32 = 1
+	bsOpts := []bitswap.Option{
+		bitswap.SetTTL(ttl),
+	}
+	ctx := context.Background()
+	seed1, _ := libp2p.New(ctx)
+	seed2, _ := libp2p.New(ctx)
+	passive1, _ := libp2p.New(ctx)
+	passive2, _ := libp2p.New(ctx)
+	leech1, _ := libp2p.New(ctx)
+
+	t.Logf("Seed1: %s", seed1.ID())
+	t.Logf("Seed2: %s", seed2.ID())
+	t.Logf("Passive1: %s", passive1.ID())
+	t.Logf("Passive2: %s", passive2.ID())
+	t.Logf("Leech1: %s", leech1.ID())
+
+	seedNode1, _ := CreateBitswapNode(ctx, seed1, bsOpts)
+	seedNode2, _ := CreateBitswapNode(ctx, seed2, bsOpts)
+	_, _ = CreateBitswapNode(ctx, passive1, bsOpts)
+	_, _ = CreateBitswapNode(ctx, passive2, bsOpts)
+	leechNode1, _ := CreateBitswapNode(ctx, leech1, bsOpts)
+
+	// bg := blocksutil.NewBlockGenerator()
+	// blks := bg.Blocks(1)
+	blks := GenerateBlocksOfSize(5, 123456)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
+	keys := make([]cid.Cid, 0)
+	for _, b := range blks {
+		keys = append(keys, b.Cid())
+		// Seeder nodes have the block
+		if err := seedNode1.HasBlock(b); err != nil {
+			t.Fatal(err)
+		}
+		if err := seedNode2.HasBlock(b); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Connect peers. Seed can only connect to seeds and passive.
+	// And leeches can only connect to leechers and passive so no seed-leech connection possible.
+	if err := SetupConnections(ctx, seed1, []host.Host{seed2, passive1, passive2}); err != nil {
+		t.Fatal("Error dialing peers seed1", err)
+	}
+	if err := SetupConnections(ctx, seed2, []host.Host{seed1, passive1, passive2}); err != nil {
+		t.Fatal("Error dialing peers seed2", err)
+	}
+	if err := SetupConnections(ctx, leech1, []host.Host{passive1, passive2}); err != nil {
+		t.Fatal("Error dialing peers leech1", err)
+	}
+	if err := SetupConnections(ctx, passive1, []host.Host{passive2}); err != nil {
+		t.Fatal("Error dialing peers passive1", err)
+	}
+
+	// Second peer broadcasts want for block CID
+	// (Received by first and third peers)
+	for _, b := range blks {
+		bb, err := leechNode1.GetBlock(ctx, b.Cid())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bb.Cid() != b.Cid() {
+			t.Fatal("Wrong block received.")
+		}
+	}
+
+	// Closing peers
+	for _, h := range []host.Host{seed1, seed2, passive1, passive2, leech1} {
+		h.Close()
+	}
+	t.Fatal()
+}

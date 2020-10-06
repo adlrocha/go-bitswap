@@ -556,7 +556,6 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 				indirectKs.updateTracker(entry.TTL, entry.Priority, entry.Cid)
 			}
 			// Only add the task to the queue if the requester wants a DONT_HAVE
-			// We only send dontHaves want TTL expires.
 
 			// We always send a DON'T HAVE right away even if we end up triggering
 			// and indirectSession to minimize duplicates. If the indirect session
@@ -672,7 +671,6 @@ func (e *Engine) ReceiveFrom(from peer.ID, blks []blocks.Block, haves []cid.Cid)
 	for _, blk := range blks {
 		// Get the size of each block
 		blockSizes[blk.Cid()] = len(blk.RawData())
-		log.Debugf("Forwarding blocks to indirect sessions...")
 		// Forward every block received to peers from indirect sessions
 		// interested in them.
 		interestedSessions := e.indirectSessions.interestedSessions(blk.Cid())
