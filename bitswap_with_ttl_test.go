@@ -15,6 +15,7 @@ import (
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	delay "github.com/ipfs/go-ipfs-delay"
 	logging "github.com/ipfs/go-log"
+	"golang.org/x/sync/errgroup"
 
 	bsnet "github.com/ipfs/go-bitswap/network"
 	ds "github.com/ipfs/go-datastore"
@@ -179,7 +180,7 @@ func TestIndirectSessionTTL2(t *testing.T) {
 	if err := assertBlockLists(got, blks); err != nil {
 		t.Fatal(err)
 	}
-	t.Fatal()
+	// t.Fatal()
 }
 
 func CreateBlockstore(ctx context.Context, bstoreDelay time.Duration) (blockstore.Blockstore, error) {
@@ -204,17 +205,17 @@ func GenerateBlocksOfSize(n int, size int64) []blocks.Block {
 	return generatedBlocks
 }
 
-func CreateBitswapNode(ctx context.Context, h host.Host, opts []bitswap.Option) (*bitswap.Bitswap, error) {
+func CreateBitswapNode(ctx context.Context, h host.Host, opts []bitswap.Option) (*bitswap.Bitswap, blockstore.Blockstore, error) {
 	bstore, err := CreateBlockstore(ctx, 4000)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	routing, err := nilrouting.ConstructNilRouting(ctx, nil, nil, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	net := bsnet.NewFromIpfsHost(h, routing)
-	return bitswap.New(ctx, net, bstore, opts...).(*bitswap.Bitswap), nil
+	return bitswap.New(ctx, net, bstore, opts...).(*bitswap.Bitswap), bstore, nil
 }
 
 func TestIndirectRealNet(t *testing.T) {
@@ -231,10 +232,10 @@ func TestIndirectRealNet(t *testing.T) {
 	h3, _ := libp2p.New(ctx)
 	h4, _ := libp2p.New(ctx)
 
-	node1, _ := CreateBitswapNode(ctx, h1, bsOpts)
-	_, _ = CreateBitswapNode(ctx, h2, bsOpts)
-	_, _ = CreateBitswapNode(ctx, h3, bsOpts)
-	node4, _ := CreateBitswapNode(ctx, h4, bsOpts)
+	node1, _, _ := CreateBitswapNode(ctx, h1, bsOpts)
+	_, _, _ = CreateBitswapNode(ctx, h2, bsOpts)
+	_, _, _ = CreateBitswapNode(ctx, h3, bsOpts)
+	node4, _, _ := CreateBitswapNode(ctx, h4, bsOpts)
 
 	// Connect peers
 	if err := h1.Connect(ctx, *host.InfoFromHost(h2)); err != nil {
@@ -300,15 +301,15 @@ func TestComplexTopology(t *testing.T) {
 	t.Logf("Passive2: %s", passive2.ID())
 	t.Logf("Leech1: %s", leech1.ID())
 
-	seedNode1, _ := CreateBitswapNode(ctx, seed1, bsOpts)
-	seedNode2, _ := CreateBitswapNode(ctx, seed2, bsOpts)
-	_, _ = CreateBitswapNode(ctx, passive1, bsOpts)
-	_, _ = CreateBitswapNode(ctx, passive2, bsOpts)
-	leechNode1, _ := CreateBitswapNode(ctx, leech1, bsOpts)
+	seedNode1, _, _ := CreateBitswapNode(ctx, seed1, bsOpts)
+	seedNode2, _, _ := CreateBitswapNode(ctx, seed2, bsOpts)
+	_, _, _ = CreateBitswapNode(ctx, passive1, bsOpts)
+	_, _, _ = CreateBitswapNode(ctx, passive2, bsOpts)
+	leechNode1, _, _ := CreateBitswapNode(ctx, leech1, bsOpts)
 
 	// bg := blocksutil.NewBlockGenerator()
 	// blks := bg.Blocks(1)
-	blks := GenerateBlocksOfSize(5, 123456)
+	blks := GenerateBlocksOfSize(6, 123456)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
@@ -340,21 +341,147 @@ func TestComplexTopology(t *testing.T) {
 		t.Fatal("Error dialing peers passive1", err)
 	}
 
-	// Second peer broadcasts want for block CID
-	// (Received by first and third peers)
-	for _, b := range blks {
-		bb, err := leechNode1.GetBlock(ctx, b.Cid())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if bb.Cid() != b.Cid() {
-			t.Fatal("Wrong block received.")
-		}
+	ch, err := leechNode1.GetBlocks(ctx, keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got []blocks.Block
+	for i := 0; i < len(blks); i++ {
+		b := <-ch
+		got = append(got, b)
+		t.Log("::::: BLOCK", b.Cid())
+	}
+
+	if err := assertBlockLists(got, blks); err != nil {
+		t.Fatal(err)
 	}
 
 	// Closing peers
 	for _, h := range []host.Host{seed1, seed2, passive1, passive2, leech1} {
 		h.Close()
 	}
-	t.Fatal()
+	// t.Fatal()
+}
+
+func ClearBlockstore(ctx context.Context, bstore blockstore.Blockstore) error {
+	ks, err := bstore.AllKeysChan(ctx)
+	if err != nil {
+		return err
+	}
+	g := errgroup.Group{}
+	for k := range ks {
+		c := k
+		g.Go(func() error {
+			return bstore.DeleteBlock(c)
+		})
+	}
+	return g.Wait()
+}
+
+func TestComplexTopologyAndWaves(t *testing.T) {
+	logging.SetLogLevel("engine", "DEBUG")
+	logging.SetLogLevel("bitswap", "DEBUG")
+
+	var ttl int32 = 1
+	bsOpts := []bitswap.Option{
+		bitswap.SetTTL(ttl),
+	}
+	ctx := context.Background()
+	seed1, _ := libp2p.New(ctx)
+	seed2, _ := libp2p.New(ctx)
+	passive1, _ := libp2p.New(ctx)
+	passive2, _ := libp2p.New(ctx)
+	leech1, _ := libp2p.New(ctx)
+
+	t.Logf("Seed1: %s", seed1.ID())
+	t.Logf("Seed2: %s", seed2.ID())
+	t.Logf("Passive1: %s", passive1.ID())
+	t.Logf("Passive2: %s", passive2.ID())
+	t.Logf("Leech1: %s", leech1.ID())
+
+	seedNode1, _, _ := CreateBitswapNode(ctx, seed1, bsOpts)
+	seedNode2, _, _ := CreateBitswapNode(ctx, seed2, bsOpts)
+	_, bstorePassive1, _ := CreateBitswapNode(ctx, passive1, bsOpts)
+	_, bstorePassive2, _ := CreateBitswapNode(ctx, passive2, bsOpts)
+	leechNode1, bstoreLeech1, _ := CreateBitswapNode(ctx, leech1, bsOpts)
+
+	// bg := blocksutil.NewBlockGenerator()
+	// blks := bg.Blocks(1)
+	blks := GenerateBlocksOfSize(6, 123456)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
+	keys := make([]cid.Cid, 0)
+	for _, b := range blks {
+		keys = append(keys, b.Cid())
+		// Seeder nodes have the block
+		if err := seedNode1.HasBlock(b); err != nil {
+			t.Fatal(err)
+		}
+		if err := seedNode2.HasBlock(b); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Connect peers. Seed can only connect to seeds and passive.
+	// And leeches can only connect to leechers and passive so no seed-leech connection possible.
+	if err := SetupConnections(ctx, seed1, []host.Host{seed2, passive1, passive2}); err != nil {
+		t.Fatal("Error dialing peers seed1", err)
+	}
+	if err := SetupConnections(ctx, seed2, []host.Host{seed1, passive1, passive2}); err != nil {
+		t.Fatal("Error dialing peers seed2", err)
+	}
+	if err := SetupConnections(ctx, leech1, []host.Host{passive1, passive2}); err != nil {
+		t.Fatal("Error dialing peers leech1", err)
+	}
+	if err := SetupConnections(ctx, passive1, []host.Host{passive2}); err != nil {
+		t.Fatal("Error dialing peers passive1", err)
+	}
+
+	t.Log("First wave")
+	ch, err := leechNode1.GetBlocks(ctx, keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got []blocks.Block
+	for i := 0; i < len(blks); i++ {
+		b := <-ch
+		got = append(got, b)
+		t.Log("::::: BLOCK", b.Cid())
+	}
+
+	if err := assertBlockLists(got, blks); err != nil {
+		t.Fatal(err)
+	}
+
+	// Clean datastore for leech and passive peers
+	ClearBlockstore(ctx, bstoreLeech1)
+	ClearBlockstore(ctx, bstorePassive1)
+	ClearBlockstore(ctx, bstorePassive2)
+
+	got = make([]blocks.Block, 0)
+	t.Log("Second wave")
+	ch, err = leechNode1.GetBlocks(ctx, keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < len(blks); i++ {
+		b := <-ch
+		got = append(got, b)
+		t.Log("::::: BLOCK", b.Cid())
+	}
+
+	if err := assertBlockLists(got, blks); err != nil {
+		t.Fatal(err)
+	}
+
+	// Closing peers
+	for _, h := range []host.Host{seed1, seed2, passive1, passive2, leech1} {
+		h.Close()
+	}
+	// t.Fatal()
 }

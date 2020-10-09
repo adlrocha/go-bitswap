@@ -82,6 +82,10 @@ func New(ctx context.Context, sessionFactory SessionFactory, sessionInterestMana
 	}
 }
 
+func (sm *SessionManager) GetSessionInterestManager() *bssim.SessionInterestManager {
+	return sm.sessionInterestManager
+}
+
 // NewSession initializes a session with the given context, and adds to the
 // session manager.
 func (sm *SessionManager) NewSession(ctx context.Context,
