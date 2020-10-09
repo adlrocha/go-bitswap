@@ -281,9 +281,9 @@ func TestReceiveFromIndirectSesesion(t *testing.T) {
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
 
-	sess1, id1 := sm.NewIndirectSession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL)
-	sess2, id2 := sm.NewIndirectSession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL)
-	sess3, id3 := sm.NewIndirectSession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL)
+	sess1, id1 := sm.NewRelaySession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL)
+	sess2, id2 := sm.NewRelaySession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL)
+	sess3, id3 := sm.NewRelaySession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL)
 	firstSession := sess1.(*fakeSession)
 	secondSession := sess2.(*fakeSession)
 	thirdSession := sess3.(*fakeSession)

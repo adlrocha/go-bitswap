@@ -106,9 +106,9 @@ func (sm *SessionManager) NewSession(ctx context.Context,
 	return session
 }
 
-// NewIndirectSession initializes a session with the given context, and adds to the
+// NewRelaySession initializes a session with the given context, and adds to the
 // session manager returning the id
-func (sm *SessionManager) NewIndirectSession(ctx context.Context,
+func (sm *SessionManager) NewRelaySession(ctx context.Context,
 	provSearchDelay time.Duration,
 	rebroadcastDelay delay.D,
 	ttl int32) (exchange.Fetcher, uint64) {

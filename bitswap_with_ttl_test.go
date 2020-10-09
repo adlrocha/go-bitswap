@@ -26,7 +26,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/host"
 )
 
-func TestIndirectSessionTTL1(t *testing.T) {
+func TestRelaySessionTTL1(t *testing.T) {
 	logging.SetLogLevel("engine", "DEBUG")
 	// If you change the TTL to zero the test should timeout because
 	// there is no direct connection between peers.
@@ -97,7 +97,7 @@ func TestIndirectSessionTTL1(t *testing.T) {
 	fmt.Println(peerB.Exchange.Stat())
 }
 
-func TestIndirectSessionTTL2(t *testing.T) {
+func TestRelaySessionTTL2(t *testing.T) {
 	var ttl int32 = 2
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -218,7 +218,7 @@ func CreateBitswapNode(ctx context.Context, h host.Host, opts []bitswap.Option) 
 	return bitswap.New(ctx, net, bstore, opts...).(*bitswap.Bitswap), bstore, nil
 }
 
-func TestIndirectRealNet(t *testing.T) {
+func TestRelayRealNet(t *testing.T) {
 	logging.SetLogLevel("engine", "DEBUG")
 	// logging.SetLogLevel("bitswap", "DEBUG")
 	var ttl int32 = 2

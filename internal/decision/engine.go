@@ -87,7 +87,7 @@ const (
 	defaultProvSearchDelay = time.Second
 
 	// Priority used for all blocks in indirect sessions
-	defualtPriorityIndirectSessions = math.MaxInt32 - 5
+	defualtPriorityRelaySessions = math.MaxInt32 - 5
 )
 
 // Envelope contains a message for a Peer.
@@ -178,8 +178,8 @@ type Engine struct {
 
 	self peer.ID
 
-	// indirectSessions registry. Tracks indirect sessions (blocks searched for others)
-	indirectSessions *sessionRegistry
+	// relaySessions registry. Tracks indirect sessions (blocks searched for others)
+	relaySessions *sessionRegistry
 }
 
 // NewEngine creates a new block sending engine for the given block store
@@ -204,7 +204,7 @@ func newEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger,
 		sendDontHaves:                   true,
 		self:                            self,
 		sm:                              sm,
-		indirectSessions:                newSessionRegistry(),
+		relaySessions:                   newSessionRegistry(),
 	}
 	e.tagQueued = fmt.Sprintf(tagFormat, "queued", uuid.New().String())
 	e.tagUseful = fmt.Sprintf(tagFormat, "useful", uuid.New().String())
@@ -236,7 +236,7 @@ func (e *Engine) removeKeysOwnedActiveSessions(keys []cid.Cid) []cid.Cid {
 func (e *Engine) HasDirectSession(interestedSessions []uint64) bool {
 	i := 0
 	for _, sess := range interestedSessions {
-		if e.indirectSessions.has(sess) {
+		if e.relaySessions.has(sess) {
 			i++
 		}
 	}
@@ -248,12 +248,12 @@ func (e *Engine) HasDirectSession(interestedSessions []uint64) bool {
 	return true
 }
 
-// OnlyIndirectSessions checks if the list of sessions passed are only indirect.
-func (e *Engine) OnlyIndirectSessions(interestedSessions []uint64) bool {
+// OnlyRelaySessions checks if the list of sessions passed are only indirect.
+func (e *Engine) OnlyRelaySessions(interestedSessions []uint64) bool {
 	for _, sess := range interestedSessions {
 		// If one of the interested sessions is not indirect means that it is
 		// direct
-		if !e.indirectSessions.has(sess) {
+		if !e.relaySessions.has(sess) {
 			return false
 		}
 	}
@@ -429,7 +429,7 @@ func (e *Engine) nextEnvelope(ctx context.Context) (*Envelope, error) {
 		// Remove blocks being sent from indirect sessions.
 		for _, b := range blks {
 			log.Debugf("local: %v Removing key from indirect session as it's being sent.")
-			e.indirectSessions.removeKey(b.Cid())
+			e.relaySessions.removeKey(b.Cid())
 			// TODO: Here we should remove all blocks from indirect sessions
 			// to avoid having data we haven't requested. I am going to address
 			// this in the future, because I could remove blocks that belong exclusively
@@ -441,7 +441,7 @@ func (e *Engine) nextEnvelope(ctx context.Context) (*Envelope, error) {
 			// // Retrieve interested sessions for the block.
 			// sess := e.sim.InterestedSessions([]cid.Cid{b.Cid()}, []cid.Cid{}, []cid.Cid{})
 			// // Check if only indirect sessions interested in block.
-			// if !e.OnlyIndirectSessions(sess) {
+			// if !e.OnlyRelaySessions(sess) {
 			// 	// Remove from datastore.
 			// 	e.bsm.bs.DeleteBlock(b.Cid())
 			// }
@@ -561,7 +561,7 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 		// Remove keys cancelled from indirect sessions, and the full session if there are
 		// no keys pending.
 		log.Debugf("local: %v Removing key from received cancels", e.self)
-		e.indirectSessions.removeKey(entry.Cid)
+		e.relaySessions.removeKey(entry.Cid)
 		// Remove cancelled blocks from the queue
 		log.Debugw("Bitswap engine <- cancel", "local", e.self, "from", p, "cid", entry.Cid)
 		if l.CancelWant(entry.Cid) {
@@ -598,12 +598,12 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 				// I am not going to approach in this first implementation.
 				// indirectKs.updateTracker(entry.TTL, entry.Priority, entry.Cid)
 
-				indirectKs.updateTracker(entry.TTL, defualtPriorityIndirectSessions, entry.Cid)
+				indirectKs.updateTracker(entry.TTL, defualtPriorityRelaySessions, entry.Cid)
 			}
 			// Only add the task to the queue if the requester wants a DONT_HAVE
 
 			// We always send a DON'T HAVE right away even if we end up triggering
-			// and indirectSession to minimize duplicates. If the indirect session
+			// and relaySession to minimize duplicates. If the indirect session
 			// ends up finding the block it will send a HAVE message and update
 			// the requested accordingly. DON'T HAVEs are updatable through new
 			// BlockPresence information.
@@ -659,7 +659,7 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 	// Start an indirect session for each of the wants with pending TTL
 	for ttl, obs := range indirectKs.t {
 		for priority, keys := range obs {
-			log.Debugf("local: %v Starting indirectSession %v, %v, %d, %d", e.self, p, keys, ttl-1, priority)
+			log.Debugf("local: %v Starting relaySession %v, %v, %d, %d", e.self, p, keys, ttl-1, priority)
 			e.startIndirectSession(ctx, p, keys, ttl-1, priority)
 		}
 	}
@@ -718,7 +718,7 @@ func (e *Engine) ReceiveFrom(from peer.ID, blks []blocks.Block, haves []cid.Cid)
 		blockSizes[blk.Cid()] = len(blk.RawData())
 		// Forward every block received to peers from indirect sessions
 		// interested in them.
-		interestedSessions := e.indirectSessions.interestedSessions(blk.Cid())
+		interestedSessions := e.relaySessions.interestedSessions(blk.Cid())
 
 		for _, sess := range interestedSessions {
 			log.Debugf("local: %v Sending block to indirect session: %v", e.self, sess.cids)
@@ -776,7 +776,7 @@ func (e *Engine) ReceiveFrom(from peer.ID, blks []blocks.Block, haves []cid.Cid)
 	// Forward every have message of indirect sessions to its source.
 	for _, h := range haves {
 		work = true
-		interestedSessions := e.indirectSessions.interestedSessions(h)
+		interestedSessions := e.relaySessions.interestedSessions(h)
 		// Entrysize of block presence
 		entrySize := bsmsg.BlockPresenceSize(h)
 		for _, sess := range interestedSessions {
@@ -807,7 +807,7 @@ func (e *Engine) startIndirectSession(ctx context.Context, peer peer.ID,
 	keys []cid.Cid, ttl int32, priority int32) {
 	// Check if there is already an indirect session for that peer and that cid
 	// before starting a new one.
-	keys = e.indirectSessions.notActive(peer, keys)
+	keys = e.relaySessions.notActive(peer, keys)
 	log.Debugf("Keys not active in indirect sessions %v", ttl, keys)
 
 	// Do not start indirect sessions from keys that are active in an active session
@@ -818,9 +818,9 @@ func (e *Engine) startIndirectSession(ctx context.Context, peer peer.ID,
 	// If there are keys not included in an indirect session for a peer it needs to be started.
 	if len(keys) != 0 {
 		// Create session
-		session, id := e.sm.NewIndirectSession(ctx, defaultProvSearchDelay, delay.Fixed(time.Minute), ttl)
+		session, id := e.sm.NewRelaySession(ctx, defaultProvSearchDelay, delay.Fixed(time.Minute), ttl)
 		// Add session ID to indirect session registry.
-		e.indirectSessions.add(id, peer, keys, ttl, priority)
+		e.relaySessions.add(id, peer, keys, ttl, priority)
 		log.Debugf("Triggering block search")
 		// Trigger block search
 		session.GetBlocks(ctx, keys)
