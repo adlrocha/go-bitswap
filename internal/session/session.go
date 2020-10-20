@@ -356,10 +356,8 @@ func (s *Session) broadcast(ctx context.Context, wants []cid.Cid) {
 		wants = s.sw.PrepareBroadcast()
 	}
 
-	// TODO: Instead of sending wantBlocks and wantHaves together we could send first
-	// want-blocks, wait for a bit and then send want-haves to limit the number of wants exchanged.
-	// But how much should we wait?
-
+	// If we are broadcasting it means tha peers from the want-block of the pbr have sent
+	// DON'T HAVEs so in this second round we send the Want-blocks of the PBR and want-haves.
 	// Broadcast a want-block to the latest peers in the peerBlockRegistry that have requested CID.
 	s.broadcastWantBlocksPBR(ctx, wants)
 	// Broadcast a want-have for the live wants to everyone we're connected to
@@ -394,7 +392,13 @@ func (s *Session) handlePeriodicSearch(ctx context.Context) {
 	// for new providers for blocks.
 	s.findMorePeers(ctx, randomWant)
 
-	s.broadcastWantHaves(ctx, []cid.Cid{randomWant})
+	// If there are candidates in the PBR for this periodic random want
+	// we don't perform a full broadcast to minimize the number of messages
+	// exchanged.
+	pbrSent := s.broadcastWantBlocksPBR(ctx, []cid.Cid{randomWant})
+	if !pbrSent {
+		s.broadcastWantHaves(ctx, []cid.Cid{randomWant})
+	}
 
 	s.periodicSearchTimer.Reset(s.periodicSearchDelay.NextWaitTime())
 }
@@ -493,9 +497,12 @@ func (s *Session) wantBlocks(ctx context.Context, newks []cid.Cid) {
 	if len(ks) > 0 {
 		log.Infow("No peers - broadcasting", "session", s.id, "want-count", len(ks))
 		// First send want-blocks to candidates of PBR.
-		s.broadcastWantBlocksPBR(ctx, ks)
-		// Then send want-haves to all connected peers.
-		s.broadcastWantHaves(ctx, ks)
+		pbrSent := s.broadcastWantBlocksPBR(ctx, ks)
+		// If no candidate blocks found from pbr then send want-haves to all connected peers.
+		if !pbrSent {
+			log.Infow("No pbr candidates - broadcasting", "session", s.id, "want-count", len(ks))
+			s.broadcastWantHaves(ctx, ks)
+		}
 	}
 }
 
@@ -506,26 +513,28 @@ func (s *Session) broadcastWantHaves(ctx context.Context, wants []cid.Cid) {
 }
 
 // Send want-blocks to peers that recently sent want messages for CID. According to peerblockregistry
-func (s *Session) broadcastWantBlocksPBR(ctx context.Context, wants []cid.Cid) {
+func (s *Session) broadcastWantBlocksPBR(ctx context.Context, wants []cid.Cid) bool {
 	log.Debugw("broadcastWantBlockPBR", "session", s.id, "cids", wants)
 	// If nil peerBlockRegistry return
-	// TODO: Now if pbrEnabled == false we don't update the registry so no wantBlocks
-	// will be sent. It'd better if we leverage that variable to avoid entering
-	// this function.
 	if s.peerBlockRegistry == nil {
-		return
+		return false
 	}
 
-	// TODO: Is there a more efficient way of implementing this so we aggregate CIDs for
-	// peers and we don't make individual calls to sendWants?
 	for _, w := range wants {
 		// Get latest peers that sent that want message
 		candidates := s.peerBlockRegistry.GetCandidates(w)
+		log.Debugw("broadcastWantBlockPBR", "session", s.id, "candidates", len(candidates))
+		// If no candidates return false so we broadcast WANT-HAVES
+		if len(candidates) == 0 {
+			return false
+		}
+
 		// Send a want-block to each of them
 		for _, c := range candidates {
 			s.pm.SendWants(ctx, c, []cid.Cid{w}, nil)
 		}
 	}
+	return true
 }
 
 // The session will broadcast if it has outstanding wants and doesn't receive

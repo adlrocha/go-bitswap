@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/ipfs/go-cid"
+	logging "github.com/ipfs/go-log"
 	peer "github.com/libp2p/go-libp2p-peer"
 	"github.com/lleo/go-hamt"
 	"github.com/lleo/go-hamt/key"
@@ -19,6 +20,8 @@ type HAMTRegistry struct {
 type cidKey struct {
 	cid cid.Cid
 }
+
+var log = logging.Logger("pbr")
 
 func NewHAMTRegistry() PeerBlockRegistry {
 	return &HAMTRegistry{
@@ -50,6 +53,7 @@ func (hr *HAMTRegistry) GetCandidates(cid cid.Cid) []peer.ID {
 	// key := &cidKey{cid: cid}
 
 	peers, res := hr.CidHAMT.Get(key)
+	log.Debugw("HAMTRegistry <- Get", "peers", peers)
 
 	if !res {
 		return []peer.ID{}
@@ -75,7 +79,6 @@ func (hr *HAMTRegistry) UpdateRegistry(p peer.ID, cid cid.Cid, priority int32) e
 	peerList := []peer.ID{}
 	if res {
 		peerList = peers.([]peer.ID)
-
 	}
 
 	// Update with the incoming peer
@@ -88,6 +91,8 @@ func (hr *HAMTRegistry) UpdateRegistry(p peer.ID, cid cid.Cid, priority int32) e
 
 	// To test:
 	peers, res = hr.CidHAMT.Get(key)
+	log.Debugw("HAMTRegistry <- Update", "cid", cid.String(), "peer", p, "peerList", peers)
+
 	return nil
 }
 
@@ -102,4 +107,6 @@ func (hr *HAMTRegistry) Clear() {
 func (hr *HAMTRegistry) GarbageCollect() {
 	// TODO:; Periodically cleans the registry
 	// to remove old and outdated entries
+	// We can use here the characteristic time of the cache to
+	// remove this.
 }

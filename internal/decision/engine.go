@@ -199,6 +199,7 @@ func newEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger,
 		sendDontHaves:                   true,
 		self:                            self,
 		peerBlockRegistry:               peerBlockRegistry,
+		pbrEnabled:                      true,
 	}
 	e.tagQueued = fmt.Sprintf(tagFormat, "queued", uuid.New().String())
 	e.tagUseful = fmt.Sprintf(tagFormat, "useful", uuid.New().String())
