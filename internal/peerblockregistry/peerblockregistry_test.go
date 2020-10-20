@@ -2,6 +2,7 @@ package peerblockregistry
 
 import (
 	"fmt"
+	"runtime"
 	"testing"
 
 	"github.com/ipfs/go-bitswap/internal/testutil"
@@ -124,4 +125,54 @@ func TestHAMTPBR(t *testing.T) {
 	if !pbr.(*HAMTRegistry).CidHAMT.IsEmpty() {
 		t.Fatalf("The registry wasn't cleared successfully")
 	}
+}
+
+func TestBenchmarkFlatRegistry(t *testing.T) {
+	pbr := NewFlatRegistry()
+	cids := testutil.GenerateCids(1000000)
+	peers := testutil.GeneratePeers(1000000)
+
+	// UpdateRegistry with CIDs
+	for i := 0; i < 1000000; i++ {
+		pbr.UpdateRegistry(peers[i], cids[i], int32(i))
+	}
+
+	for i := 0; i < 1000000; i++ {
+		pbr.GetCandidates(cids[i])
+	}
+	PrintMemUsage()
+	t.Fatal()
+}
+
+func TestBenchmarkHAMTRegistry(t *testing.T) {
+	pbr := NewHAMTRegistry()
+	cids := testutil.GenerateCids(1000000)
+	peers := testutil.GeneratePeers(1000000)
+
+	// UpdateRegistry with CIDs
+	for i := 0; i < 1000000; i++ {
+		pbr.UpdateRegistry(peers[i], cids[i], int32(i))
+	}
+
+	for i := 0; i < 1000000; i++ {
+		pbr.GetCandidates(cids[i])
+	}
+	PrintMemUsage()
+	t.Fatal()
+}
+
+// PrintMemUsage outputs the current, total and OS memory being used. As well as the number
+// of garage collection cycles completed.
+func PrintMemUsage() {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	// For info on each, see: https://golang.org/pkg/runtime/#MemStats
+	fmt.Printf("Alloc = %v MiB", bToMb(m.Alloc))
+	fmt.Printf("\tTotalAlloc = %v MiB", bToMb(m.TotalAlloc))
+	fmt.Printf("\tSys = %v MiB", bToMb(m.Sys))
+	fmt.Printf("\tNumGC = %v\n", m.NumGC)
+}
+
+func bToMb(b uint64) uint64 {
+	return b / 1024 / 1024
 }

@@ -160,7 +160,7 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 	pqm := bspqm.New(ctx, network)
 
 	// TODO: Should make pbr type configurable
-	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("flat")
 
 	sessionFactory := func(
 		sessctx context.Context,
