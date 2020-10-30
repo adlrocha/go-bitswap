@@ -3,6 +3,8 @@ package peermanager
 import (
 	"bytes"
 	"fmt"
+	"math/rand"
+	"time"
 
 	rs "github.com/ipfs/go-bitswap/internal/relaysession"
 	cid "github.com/ipfs/go-cid"
@@ -115,6 +117,35 @@ func (pwm *peerWantManager) removePeer(p peer.ID) {
 	delete(pwm.peerWants, p)
 }
 
+// Selected a random suset of peers according to the degree of the relay session.
+func (pwm *peerWantManager) selectRandomSubset(registry *rs.RelayRegistry) map[peer.ID]*peerWant {
+	filteredPeers := make(map[peer.ID]*peerWant)
+	rand.Seed(time.Now().UnixNano())
+	perm := rand.Perm(len(pwm.peerWants))
+	ks := make([]peer.ID, 0)
+
+	if int(registry.Degree) < len(pwm.peerWants) {
+		// Get all peers available to broadcast
+		for k := range pwm.peerWants {
+			ks = append(ks, k)
+		}
+
+		// Choose a random subset.
+		i := 0
+		for _, p := range perm {
+			filteredPeers[ks[p]] = pwm.peerWants[ks[p]]
+			i++
+
+			if i >= int(registry.Degree) {
+				break
+			}
+		}
+	} else {
+		filteredPeers = pwm.peerWants
+	}
+	return filteredPeers
+}
+
 // broadcastWantHaves sends want-haves that doen't have it yet.
 func (pwm *peerWantManager) broadcastRelayWants(wantHaves []cid.Cid, registry *rs.RelayRegistry) {
 	unsent := make([]cid.Cid, 0, len(wantHaves))
@@ -140,8 +171,14 @@ func (pwm *peerWantManager) broadcastRelayWants(wantHaves []cid.Cid, registry *r
 	// Allocate a single buffer to filter broadcast wants for each peer
 	bcstWantsBuffer := make([]cid.Cid, 0, len(unsent))
 
+	// TODO: From all peers we limit the number of peers of the relayBroadcast
+	// to the degree of the relaySession. We currently choose the broadcasting
+	// peers randomly, but additonal logic could be added here to do it in
+	// smarter way.
+	filteredPeers := pwm.selectRandomSubset(registry)
+
 	// Send broadcast wants to each peer
-	for _, pws := range pwm.peerWants {
+	for _, pws := range filteredPeers {
 		peerUnsent := bcstWantsBuffer[:0]
 		for _, c := range unsent {
 			// If we've already sent a want to this peer, skip them.
