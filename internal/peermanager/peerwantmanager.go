@@ -187,9 +187,6 @@ func (pwm *peerWantManager) broadcastRelayWants(wantHaves []cid.Cid, registry *r
 			}
 		}
 
-		// TODO: Implement degree here and be sure we are not resetting wantlists.
-		// Check that no direct session interested in the block so we don't restart
-		// the ledger in connected peers.
 		if len(peerUnsent) > 0 {
 			for _, c := range peerUnsent {
 				pws.peerQueue.AddBroadcastWantHaves([]cid.Cid{c}, registry.GetTTL(c))
