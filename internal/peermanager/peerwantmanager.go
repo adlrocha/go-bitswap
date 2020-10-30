@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 
+	rs "github.com/ipfs/go-bitswap/internal/relaysession"
 	cid "github.com/ipfs/go-cid"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 )
@@ -112,6 +113,52 @@ func (pwm *peerWantManager) removePeer(p peer.ID) {
 	})
 
 	delete(pwm.peerWants, p)
+}
+
+// broadcastWantHaves sends want-haves that doen't have it yet.
+func (pwm *peerWantManager) broadcastRelayWants(wantHaves []cid.Cid, registry *rs.RelayRegistry) {
+	unsent := make([]cid.Cid, 0, len(wantHaves))
+	for _, c := range wantHaves {
+		if pwm.broadcastWants.Has(c) {
+			// Already a broadcast want, skip it.
+			continue
+		}
+		pwm.broadcastWants.Add(c)
+		unsent = append(unsent, c)
+
+		// If no peer has a pending want for the key
+		if _, ok := pwm.wantPeers[c]; !ok {
+			// Increment the total wants gauge
+			pwm.wantGauge.Inc()
+		}
+	}
+
+	if len(unsent) == 0 {
+		return
+	}
+
+	// Allocate a single buffer to filter broadcast wants for each peer
+	bcstWantsBuffer := make([]cid.Cid, 0, len(unsent))
+
+	// Send broadcast wants to each peer
+	for _, pws := range pwm.peerWants {
+		peerUnsent := bcstWantsBuffer[:0]
+		for _, c := range unsent {
+			// If we've already sent a want to this peer, skip them.
+			if !pws.wantBlocks.Has(c) && !pws.wantHaves.Has(c) {
+				peerUnsent = append(peerUnsent, c)
+			}
+		}
+
+		// TODO: Implement degree here and be sure we are not resetting wantlists.
+		// Check that no direct session interested in the block so we don't restart
+		// the ledger in connected peers.
+		if len(peerUnsent) > 0 {
+			for _, c := range peerUnsent {
+				pws.peerQueue.AddBroadcastWantHaves([]cid.Cid{c}, registry.GetTTL(c))
+			}
+		}
+	}
 }
 
 // broadcastWantHaves sends want-haves to any peers that have not yet been sent them.

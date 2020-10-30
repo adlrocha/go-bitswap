@@ -380,8 +380,8 @@ func ClearBlockstore(ctx context.Context, bstore blockstore.Blockstore) error {
 }
 
 func TestComplexTopologyAndWaves(t *testing.T) {
-	logging.SetLogLevel("engine", "DEBUG")
-	logging.SetLogLevel("bitswap", "DEBUG")
+	// logging.SetLogLevel("engine", "DEBUG")
+	// logging.SetLogLevel("bitswap", "DEBUG")
 
 	var ttl int32 = 1
 	bsOpts := []bitswap.Option{

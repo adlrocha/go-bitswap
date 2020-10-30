@@ -7,6 +7,7 @@ import (
 	logging "github.com/ipfs/go-log"
 	"github.com/ipfs/go-metrics-interface"
 
+	rs "github.com/ipfs/go-bitswap/internal/relaysession"
 	cid "github.com/ipfs/go-cid"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 )
@@ -141,6 +142,18 @@ func (pm *PeerManager) BroadcastWantHaves(ctx context.Context, wantHaves []cid.C
 	pm.pwm.broadcastWantHaves(wantHaves, ttl)
 }
 
+// BroadcastRelayWants broadcasts want-haves to all peers (used by the session
+// to discover seeds).
+// For each peer it filters out want-haves that have previously been sent to
+// the peer.
+func (pm *PeerManager) BroadcastRelayWants(ctx context.Context, registry *rs.RelayRegistry, wantHaves []cid.Cid) {
+	pm.pqLk.Lock()
+	defer pm.pqLk.Unlock()
+
+	// Broadcast WantHaves with for the relay session according to degree and registry.
+	pm.pwm.broadcastRelayWants(wantHaves, registry)
+}
+
 // SendWants sends the given want-blocks and want-haves to the given peer.
 // It filters out wants that have previously been sent to the peer.
 func (pm *PeerManager) SendWants(ctx context.Context, p peer.ID, wantBlocks []cid.Cid, wantHaves []cid.Cid, ttl int32) {
@@ -188,7 +201,7 @@ func (pm *PeerManager) CurrentWantHaves() []cid.Cid {
 }
 
 // We create a messageQueue with a specific TTL according to
-// if it is a direct or a indirect session.
+// if it is a direct or a relay session.
 func (pm *PeerManager) getOrCreate(p peer.ID, ttl int32) PeerQueue {
 	pq, ok := pm.peerQueues[p]
 	if !ok {

@@ -8,6 +8,7 @@ import (
 	bsgetter "github.com/ipfs/go-bitswap/internal/getter"
 	notifications "github.com/ipfs/go-bitswap/internal/notifications"
 	bspm "github.com/ipfs/go-bitswap/internal/peermanager"
+	rs "github.com/ipfs/go-bitswap/internal/relaysession"
 	bssim "github.com/ipfs/go-bitswap/internal/sessioninterestmanager"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
@@ -15,6 +16,7 @@ import (
 	logging "github.com/ipfs/go-log"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	loggables "github.com/libp2p/go-libp2p-loggables"
+
 	"go.uber.org/zap"
 )
 
@@ -42,6 +44,7 @@ type PeerManager interface {
 	BroadcastWantHaves(context.Context, []cid.Cid, int32)
 	// SendCancels tells the PeerManager to send cancels to all peers
 	SendCancels(context.Context, []cid.Cid)
+	BroadcastRelayWants(context.Context, *rs.RelayRegistry, []cid.Cid)
 }
 
 // SessionManager manages all the sessions
@@ -134,9 +137,11 @@ type Session struct {
 
 	self peer.ID
 
-	// Used to implement indirect sessions for ttl
-	ttl      int32
-	indirect bool // Determines if the session is indirect (so blocks are not stored).
+	// Used to implement relay sessions for ttl
+	ttl   int32
+	relay bool // Determines if the session is relay (so blocks are not stored).
+	// TODO: We should start thinking about
+	relayRegistry *rs.RelayRegistry // RelayRegistry used to perform relay decisions.
 }
 
 // New creates a new bitswap session whose lifetime is bounded by the
@@ -155,7 +160,8 @@ func New(
 	periodicSearchDelay delay.D,
 	self peer.ID,
 	ttl int32,
-	indirect bool) *Session {
+	relay bool,
+	relayRegistry *rs.RelayRegistry) *Session {
 
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Session{
@@ -178,7 +184,8 @@ func New(
 		periodicSearchDelay: periodicSearchDelay,
 		self:                self,
 		ttl:                 ttl,
-		indirect:            indirect,
+		relay:               relay,
+		relayRegistry:       relayRegistry,
 	}
 	s.sws = newSessionWantSender(id, pm, sprm, sm, bpm, s.onWantsSent, s.onPeersExhausted, s.ttl)
 
@@ -478,18 +485,33 @@ func (s *Session) wantBlocks(ctx context.Context, newks []cid.Cid) {
 		s.sws.Add(newks)
 	}
 
-	// If we have discovered peers already, the sessionWantSender will
-	// send wants to them
-	if s.sprm.PeersDiscovered() {
-		return
-	}
+	// This is done by direct sessions
+	if !s.relay {
+		// If we have discovered peers already, the sessionWantSender will
+		// send wants to them
+		if s.sprm.PeersDiscovered() {
+			return
+		}
 
-	// No peers discovered yet, broadcast some want-haves
-	ks := s.sw.GetNextWants()
-	if len(ks) > 0 {
-		log.Infow("No peers - broadcasting", "session", s.id, "want-count", len(ks))
-		s.broadcastWantHaves(ctx, ks)
+		// No peers discovered yet, broadcast some want-haves
+		ks := s.sw.GetNextWants()
+		if len(ks) > 0 {
+			log.Infow("No peers - broadcasting", "session", s.id, "want-count", len(ks))
+			s.broadcastWantHaves(ctx, ks)
+		}
+	} else { // And for the relay session.
+		ks := s.sw.GetNextWants()
+		if len(ks) > 0 {
+			log.Infow("Broadcasting relays", "session", s.id, "want-count", len(ks))
+			s.broadcastRelayWants(ctx, s.relayRegistry, ks)
+		}
 	}
+}
+
+// Send want-haves to all connected peers
+func (s *Session) broadcastRelayWants(ctx context.Context, registry *rs.RelayRegistry, wants []cid.Cid) {
+	log.Debugw("broadcastWantHaves", "session", s.id, "cids", wants)
+	s.pm.BroadcastRelayWants(ctx, registry, wants)
 }
 
 // Send want-haves to all connected peers

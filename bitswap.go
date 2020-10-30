@@ -20,6 +20,7 @@ import (
 	notifications "github.com/ipfs/go-bitswap/internal/notifications"
 	bspm "github.com/ipfs/go-bitswap/internal/peermanager"
 	bspqm "github.com/ipfs/go-bitswap/internal/providerquerymanager"
+	rs "github.com/ipfs/go-bitswap/internal/relaysession"
 	bssession "github.com/ipfs/go-bitswap/internal/session"
 	bssim "github.com/ipfs/go-bitswap/internal/sessioninterestmanager"
 	bssm "github.com/ipfs/go-bitswap/internal/sessionmanager"
@@ -170,8 +171,9 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 		rebroadcastDelay delay.D,
 		self peer.ID,
 		ttl int32,
-		indirect bool) bssm.Session {
-		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self, ttl, indirect)
+		relay bool,
+		relayRegistry *rs.RelayRegistry) bssm.Session {
+		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self, ttl, relay, relayRegistry)
 	}
 	sessionPeerManagerFactory := func(ctx context.Context, id uint64) bssession.SessionPeerManager {
 		return bsspm.New(id, network.ConnectionManager())
@@ -373,7 +375,7 @@ func (bs *Bitswap) receiveBlocksFrom(ctx context.Context, from peer.ID, blks []b
 	}
 
 	// Put wanted blocks into blockstore
-	// Those belonging for indirect sessions will have to be removed
+	// Those belonging for relay sessions will have to be removed
 	// to avoid storing content I wasn't interested in. Will do this once the block
 	// has been successfully forwarded.
 	// NOTE: Check nextEnvelop in engine.go to see how this is currently
@@ -423,7 +425,7 @@ func (bs *Bitswap) receiveBlocksFrom(ctx context.Context, from peer.ID, blks []b
 	}
 
 	// If the reprovider is enabled, send wanted blocks to reprovider
-	// even if they come from indirect sesssions. This can also
+	// even if they come from relay sesssions. This can also
 	// amplify the discovery (and potential duplicates and traffic overhead).
 	if bs.provideEnabled {
 		for _, blk := range wanted {

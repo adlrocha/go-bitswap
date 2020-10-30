@@ -11,6 +11,7 @@ import (
 	bsbpm "github.com/ipfs/go-bitswap/internal/blockpresencemanager"
 	notifications "github.com/ipfs/go-bitswap/internal/notifications"
 	bspm "github.com/ipfs/go-bitswap/internal/peermanager"
+	rs "github.com/ipfs/go-bitswap/internal/relaysession"
 	bssession "github.com/ipfs/go-bitswap/internal/session"
 	bssim "github.com/ipfs/go-bitswap/internal/sessioninterestmanager"
 	"github.com/ipfs/go-bitswap/internal/testutil"
@@ -31,7 +32,7 @@ type fakeSession struct {
 	sm         bssession.SessionManager
 	notif      notifications.PubSub
 	ttl        int32
-	indirect   bool
+	relay      bool
 }
 
 func (*fakeSession) GetBlock(context.Context, cid.Cid) (blocks.Block, error) {
@@ -68,10 +69,11 @@ type fakePeerManager struct {
 	cancels []cid.Cid
 }
 
-func (*fakePeerManager) RegisterSession(peer.ID, bspm.Session)                           {}
-func (*fakePeerManager) UnregisterSession(uint64)                                        {}
-func (*fakePeerManager) SendWants(context.Context, peer.ID, []cid.Cid, []cid.Cid, int32) {}
-func (*fakePeerManager) BroadcastWantHaves(context.Context, []cid.Cid, int32)            {}
+func (*fakePeerManager) RegisterSession(peer.ID, bspm.Session)                             {}
+func (*fakePeerManager) UnregisterSession(uint64)                                          {}
+func (*fakePeerManager) SendWants(context.Context, peer.ID, []cid.Cid, []cid.Cid, int32)   {}
+func (*fakePeerManager) BroadcastWantHaves(context.Context, []cid.Cid, int32)              {}
+func (*fakePeerManager) BroadcastRelayWants(context.Context, *rs.RelayRegistry, []cid.Cid) {}
 func (fpm *fakePeerManager) SendCancels(ctx context.Context, cancels []cid.Cid) {
 	fpm.lk.Lock()
 	defer fpm.lk.Unlock()
@@ -95,14 +97,15 @@ func sessionFactory(ctx context.Context,
 	rebroadcastDelay delay.D,
 	self peer.ID,
 	ttl int32,
-	indirect bool) Session {
+	relay bool,
+	relayRegistry *rs.RelayRegistry) Session {
 	fs := &fakeSession{
-		id:       id,
-		pm:       sprm.(*fakeSesPeerManager),
-		sm:       sm,
-		notif:    notif,
-		ttl:      ttl,
-		indirect: indirect,
+		id:    id,
+		pm:    sprm.(*fakeSesPeerManager),
+		sm:    sm,
+		notif: notif,
+		ttl:   ttl,
+		relay: relay,
 	}
 	go func() {
 		<-ctx.Done()
@@ -267,7 +270,7 @@ func TestShutdown(t *testing.T) {
 	}
 }
 
-func TestReceiveFromIndirectSesesion(t *testing.T) {
+func TestReceiveFromRelaySesesion(t *testing.T) {
 	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -281,39 +284,24 @@ func TestReceiveFromIndirectSesesion(t *testing.T) {
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
 
-	sess1, id1 := sm.NewRelaySession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL)
-	sess2, id2 := sm.NewRelaySession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL)
-	sess3, id3 := sm.NewRelaySession(ctx, time.Second, delay.Fixed(time.Minute), defaultTTL)
+	sess1 := sm.StartRelaySession(ctx, time.Second, delay.Fixed(time.Minute),
+		defaultTTL, rs.NewRelaySession(10).Registry)
 	firstSession := sess1.(*fakeSession)
-	secondSession := sess2.(*fakeSession)
-	thirdSession := sess3.(*fakeSession)
-
-	if firstSession.ID() != id1 || secondSession.ID() != id2 ||
-		thirdSession.ID() != id3 {
-		t.Fatal("Indirect session with wrong ids")
-	}
 
 	sim.RecordSessionInterest(firstSession.ID(), []cid.Cid{block.Cid()})
-	sim.RecordSessionInterest(thirdSession.ID(), []cid.Cid{block.Cid()})
 
 	sm.ReceiveFrom(ctx, p, []cid.Cid{block.Cid()}, []cid.Cid{}, []cid.Cid{})
-	if len(firstSession.ks) == 0 ||
-		len(secondSession.ks) > 0 ||
-		len(thirdSession.ks) == 0 {
+	if len(firstSession.ks) == 0 {
 		t.Fatal("should have received blocks but didn't")
 	}
 
 	sm.ReceiveFrom(ctx, p, []cid.Cid{}, []cid.Cid{block.Cid()}, []cid.Cid{})
-	if len(firstSession.wantBlocks) == 0 ||
-		len(secondSession.wantBlocks) > 0 ||
-		len(thirdSession.wantBlocks) == 0 {
+	if len(firstSession.wantBlocks) == 0 {
 		t.Fatal("should have received want-blocks but didn't")
 	}
 
 	sm.ReceiveFrom(ctx, p, []cid.Cid{}, []cid.Cid{}, []cid.Cid{block.Cid()})
-	if len(firstSession.wantHaves) == 0 ||
-		len(secondSession.wantHaves) > 0 ||
-		len(thirdSession.wantHaves) == 0 {
+	if len(firstSession.wantHaves) == 0 {
 		t.Fatal("should have received want-haves but didn't")
 	}
 

@@ -10,6 +10,7 @@ import (
 
 	bsbpm "github.com/ipfs/go-bitswap/internal/blockpresencemanager"
 	notifications "github.com/ipfs/go-bitswap/internal/notifications"
+	rs "github.com/ipfs/go-bitswap/internal/relaysession"
 	bssession "github.com/ipfs/go-bitswap/internal/session"
 	bssim "github.com/ipfs/go-bitswap/internal/sessioninterestmanager"
 	exchange "github.com/ipfs/go-ipfs-exchange-interface"
@@ -38,7 +39,9 @@ type SessionFactory func(
 	rebroadcastDelay delay.D,
 	self peer.ID,
 	ttl int32,
-	indirect bool) Session
+	relay bool,
+	relayRegistry *rs.RelayRegistry,
+) Session
 
 // PeerManagerFactory generates a new peer manager for a session.
 type PeerManagerFactory func(ctx context.Context, id uint64) bssession.SessionPeerManager
@@ -95,7 +98,7 @@ func (sm *SessionManager) NewSession(ctx context.Context,
 	id := sm.GetNextSessionID()
 
 	pm := sm.peerManagerFactory(ctx, id)
-	session := sm.sessionFactory(ctx, sm, id, pm, sm.sessionInterestManager, sm.peerManager, sm.blockPresenceManager, sm.notif, provSearchDelay, rebroadcastDelay, sm.self, ttl, false)
+	session := sm.sessionFactory(ctx, sm, id, pm, sm.sessionInterestManager, sm.peerManager, sm.blockPresenceManager, sm.notif, provSearchDelay, rebroadcastDelay, sm.self, ttl, false, nil)
 
 	sm.sessLk.Lock()
 	if sm.sessions != nil { // check if SessionManager was shutdown
@@ -108,14 +111,15 @@ func (sm *SessionManager) NewSession(ctx context.Context,
 
 // NewRelaySession initializes a session with the given context, and adds to the
 // session manager returning the id
-func (sm *SessionManager) NewRelaySession(ctx context.Context,
+func (sm *SessionManager) StartRelaySession(ctx context.Context,
 	provSearchDelay time.Duration,
 	rebroadcastDelay delay.D,
-	ttl int32) (exchange.Fetcher, uint64) {
+	ttl int32,
+	relayRegistry *rs.RelayRegistry) exchange.Fetcher {
 	id := sm.GetNextSessionID()
 
 	pm := sm.peerManagerFactory(ctx, id)
-	session := sm.sessionFactory(ctx, sm, id, pm, sm.sessionInterestManager, sm.peerManager, sm.blockPresenceManager, sm.notif, provSearchDelay, rebroadcastDelay, sm.self, ttl, true)
+	session := sm.sessionFactory(ctx, sm, id, pm, sm.sessionInterestManager, sm.peerManager, sm.blockPresenceManager, sm.notif, provSearchDelay, rebroadcastDelay, sm.self, ttl, true, relayRegistry)
 
 	sm.sessLk.Lock()
 	if sm.sessions != nil { // check if SessionManager was shutdown
@@ -123,7 +127,7 @@ func (sm *SessionManager) NewRelaySession(ctx context.Context,
 	}
 	sm.sessLk.Unlock()
 
-	return session, id
+	return session
 }
 
 func (sm *SessionManager) Shutdown() {

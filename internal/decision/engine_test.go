@@ -87,6 +87,43 @@ func (fpt *fakePeerTagger) wait(tag string) {
 	<-doneCh
 }
 
+// TODO: In order to successfully run these tests we need to create a
+// SessionManager interface so that we can create a mock sessionManager.
+// I leave this for the second round of the prototype.
+type mockSessionMgr struct {
+	lk            sync.Mutex
+	removeSession bool
+	cancels       []cid.Cid
+}
+
+func newMockSessionMgr() *mockSessionMgr {
+	return &mockSessionMgr{}
+}
+
+func (msm *mockSessionMgr) removeSessionCalled() bool {
+	msm.lk.Lock()
+	defer msm.lk.Unlock()
+	return msm.removeSession
+}
+
+func (msm *mockSessionMgr) cancelled() []cid.Cid {
+	msm.lk.Lock()
+	defer msm.lk.Unlock()
+	return msm.cancels
+}
+
+func (msm *mockSessionMgr) RemoveSession(sesid uint64) {
+	msm.lk.Lock()
+	defer msm.lk.Unlock()
+	msm.removeSession = true
+}
+
+func (msm *mockSessionMgr) CancelSessionWants(sid uint64, wants []cid.Cid) {
+	msm.lk.Lock()
+	defer msm.lk.Unlock()
+	msm.cancels = append(msm.cancels, wants...)
+}
+
 type engineSet struct {
 	PeerTagger *fakePeerTagger
 	Peer       peer.ID
