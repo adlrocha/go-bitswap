@@ -79,16 +79,14 @@ func (rs *RelaySession) InterestedPeers(c cid.Cid) map[peer.ID]int32 {
 	return res
 }
 
-// InterestedPeers returns peer looking for a cid.
+// GetTTL returns peer looking for a cid.
 func (rs *RelayRegistry) GetTTL(c cid.Cid) int32 {
 	rs.lk.RLock()
 	defer rs.lk.RUnlock()
 	// TODO: We return the TTL for any of the peers requesting it. We could
 	// perform other logic to select the right TTL to send here.
-	for k := range rs.r[c] {
-		for _, ttl := range k {
-			return ttl
-		}
+	for _, ttl := range rs.r[c] {
+		return ttl
 	}
 
 	return 0
