@@ -10,6 +10,7 @@ import (
 
 	bsbpm "github.com/ipfs/go-bitswap/internal/blockpresencemanager"
 	notifications "github.com/ipfs/go-bitswap/internal/notifications"
+	pbr "github.com/ipfs/go-bitswap/internal/peerblockregistry"
 	bspm "github.com/ipfs/go-bitswap/internal/peermanager"
 	rs "github.com/ipfs/go-bitswap/internal/relaysession"
 	bssession "github.com/ipfs/go-bitswap/internal/session"
@@ -69,11 +70,12 @@ type fakePeerManager struct {
 	cancels []cid.Cid
 }
 
-func (*fakePeerManager) RegisterSession(peer.ID, bspm.Session)                             {}
-func (*fakePeerManager) UnregisterSession(uint64)                                          {}
-func (*fakePeerManager) SendWants(context.Context, peer.ID, []cid.Cid, []cid.Cid, int32)   {}
-func (*fakePeerManager) BroadcastWantHaves(context.Context, []cid.Cid, int32)              {}
-func (*fakePeerManager) BroadcastRelayWants(context.Context, *rs.RelayRegistry, []cid.Cid) {}
+func (*fakePeerManager) RegisterSession(peer.ID, bspm.Session)                           {}
+func (*fakePeerManager) UnregisterSession(uint64)                                        {}
+func (*fakePeerManager) SendWants(context.Context, peer.ID, []cid.Cid, []cid.Cid, int32) {}
+func (*fakePeerManager) BroadcastWantHaves(context.Context, []cid.Cid, int32)            {}
+func (*fakePeerManager) BroadcastRelayWants(context.Context, *rs.SessionRegistries, []cid.Cid) {
+}
 func (fpm *fakePeerManager) SendCancels(ctx context.Context, cancels []cid.Cid) {
 	fpm.lk.Lock()
 	defer fpm.lk.Unlock()
@@ -98,7 +100,8 @@ func sessionFactory(ctx context.Context,
 	self peer.ID,
 	ttl int32,
 	relay bool,
-	relayRegistry *rs.RelayRegistry) Session {
+	relayRegistry *rs.RelayRegistry,
+	peerBlockRegistry pbr.PeerBlockRegistry) Session {
 	fs := &fakeSession{
 		id:    id,
 		pm:    sprm.(*fakeSesPeerManager),
@@ -127,7 +130,9 @@ func TestReceiveFrom(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
+
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
@@ -174,8 +179,9 @@ func TestReceiveBlocksWhenManagerShutdown(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
 
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
 
@@ -208,8 +214,9 @@ func TestReceiveBlocksWhenSessionContextCancelled(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
 
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
 
@@ -244,8 +251,9 @@ func TestShutdown(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
 
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
 	cids := []cid.Cid{block.Cid()}
@@ -279,7 +287,8 @@ func TestReceiveFromRelaySesesion(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))

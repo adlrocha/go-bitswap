@@ -7,6 +7,8 @@ import (
 	"github.com/ipfs/go-bitswap/internal/testutil"
 	cid "github.com/ipfs/go-cid"
 	peer "github.com/libp2p/go-libp2p-core/peer"
+
+	pbr "github.com/ipfs/go-bitswap/internal/peerblockregistry"
 )
 
 var defaultTTL int32 = 1
@@ -534,8 +536,9 @@ func TestPWMBroadcastRelay(t *testing.T) {
 	peers := testutil.GeneratePeers(3)
 	cids := testutil.GenerateCids(2)
 	cids2 := testutil.GenerateCids(2)
-	r := &rs.RelayRegistry{
-		Degree: 1,
+	r := &rs.SessionRegistries{
+		RelayRegistry:     &rs.RelayRegistry{Degree: 1},
+		PeerBlockRegistry: pbr.NewPeerBlockRegistry("hamt"),
 	}
 
 	peerQueues := make(map[peer.ID]PeerQueue)

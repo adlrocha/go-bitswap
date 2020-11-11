@@ -146,12 +146,12 @@ func (pm *PeerManager) BroadcastWantHaves(ctx context.Context, wantHaves []cid.C
 // to discover seeds).
 // For each peer it filters out want-haves that have previously been sent to
 // the peer.
-func (pm *PeerManager) BroadcastRelayWants(ctx context.Context, registry *rs.RelayRegistry, wantHaves []cid.Cid) {
+func (pm *PeerManager) BroadcastRelayWants(ctx context.Context, sessR *rs.SessionRegistries, wantHaves []cid.Cid) {
 	pm.pqLk.Lock()
 	defer pm.pqLk.Unlock()
 
 	// Broadcast WantHaves with for the relay session according to degree and registry.
-	pm.pwm.broadcastRelayWants(wantHaves, registry)
+	pm.pwm.broadcastRelayWants(wantHaves, sessR)
 }
 
 // SendWants sends the given want-blocks and want-haves to the given peer.

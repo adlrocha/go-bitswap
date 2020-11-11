@@ -78,10 +78,10 @@ func (pm *mockPeerManager) has(p peer.ID, sid uint64) bool {
 	return false
 }
 
-func (*mockPeerManager) UnregisterSession(uint64)                                          {}
-func (*mockPeerManager) BroadcastWantHaves(context.Context, []cid.Cid, int32)              {}
-func (*mockPeerManager) BroadcastRelayWants(context.Context, *rs.RelayRegistry, []cid.Cid) {}
-func (*mockPeerManager) SendCancels(context.Context, []cid.Cid)                            {}
+func (*mockPeerManager) UnregisterSession(uint64)                                              {}
+func (*mockPeerManager) BroadcastWantHaves(context.Context, []cid.Cid, int32)                  {}
+func (*mockPeerManager) BroadcastRelayWants(context.Context, *rs.SessionRegistries, []cid.Cid) {}
+func (*mockPeerManager) SendCancels(context.Context, []cid.Cid)                                {}
 
 func (pm *mockPeerManager) SendWants(ctx context.Context, p peer.ID, wantBlocks []cid.Cid, wantHaves []cid.Cid, ttl int32) {
 	pm.lk.Lock()
