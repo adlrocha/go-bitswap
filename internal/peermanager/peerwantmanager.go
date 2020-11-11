@@ -118,13 +118,13 @@ func (pwm *peerWantManager) removePeer(p peer.ID) {
 }
 
 // Selected a random suset of peers according to the degree of the relay session.
-func (pwm *peerWantManager) selectRandomSubset(registry *rs.RelayRegistry) map[peer.ID]*peerWant {
+func (pwm *peerWantManager) selectPeerSubset(sessR *rs.SessionRegistries) map[peer.ID]*peerWant {
 	filteredPeers := make(map[peer.ID]*peerWant)
 	rand.Seed(time.Now().UnixNano())
 	perm := rand.Perm(len(pwm.peerWants))
 	ks := make([]peer.ID, 0)
 
-	if int(registry.Degree) < len(pwm.peerWants) {
+	if int(sessR.RelayRegistry.Degree) < len(pwm.peerWants) {
 		// Get all peers available to broadcast
 		for k := range pwm.peerWants {
 			ks = append(ks, k)
@@ -136,7 +136,7 @@ func (pwm *peerWantManager) selectRandomSubset(registry *rs.RelayRegistry) map[p
 			filteredPeers[ks[p]] = pwm.peerWants[ks[p]]
 			i++
 
-			if i >= int(registry.Degree) {
+			if i >= int(sessR.RelayRegistry.Degree) {
 				break
 			}
 		}
@@ -147,7 +147,7 @@ func (pwm *peerWantManager) selectRandomSubset(registry *rs.RelayRegistry) map[p
 }
 
 // broadcastWantHaves sends want-haves that doen't have it yet.
-func (pwm *peerWantManager) broadcastRelayWants(wantHaves []cid.Cid, registry *rs.RelayRegistry) {
+func (pwm *peerWantManager) broadcastRelayWants(wantHaves []cid.Cid, sessR *rs.SessionRegistries) {
 	unsent := make([]cid.Cid, 0, len(wantHaves))
 	for _, c := range wantHaves {
 		if pwm.broadcastWants.Has(c) {
@@ -171,25 +171,46 @@ func (pwm *peerWantManager) broadcastRelayWants(wantHaves []cid.Cid, registry *r
 	// Allocate a single buffer to filter broadcast wants for each peer
 	bcstWantsBuffer := make([]cid.Cid, 0, len(unsent))
 
-	// TODO: From all peers we limit the number of peers of the relayBroadcast
-	// to the degree of the relaySession. We currently choose the broadcasting
-	// peers randomly, but additonal logic could be added here to do it in
-	// smarter way.
-	filteredPeers := pwm.selectRandomSubset(registry)
+	// Buffer used to track the peers for the CID to which
+	// a WANT-HAVE have already been sent. We need to
+	// track this to account for the max. degree.
+	peerForCid := make(map[cid.Cid]int, 0)
+
+	// For each CID that has not been broadcasted send a
+	// WANT messages.
+	for _, c := range unsent {
+		candidates := sessR.PeerBlockRegistry.GetCandidates(c)
+		peerForCid[c] = len(candidates)
+		// Send WANT-HAVE to candidate of the PBR.
+		// TODO: Should we send a WANT-BLOCK directly see if it has the content?
+		for _, p := range candidates {
+			pwm.peerWants[p].peerQueue.AddWants([]cid.Cid{}, []cid.Cid{c}, sessR.RelayRegistry.GetTTL(c))
+		}
+	}
+
+	// From all peers we limit the number of peers of the relayBroadcast
+	// to the degree of the relaySession. We choose a random subset of peers
+	// to combine them with the candidates of the PBR for the broadcasting round.
+	// TODO: Instead of choosing them randomly we could use the same logic used by session to probabilistically
+	// choose the peers to whom to send the WANT-BLOCK.
+	filteredPeers := pwm.selectPeerSubset(sessR)
 
 	// Send broadcast wants to each peer
 	for _, pws := range filteredPeers {
 		peerUnsent := bcstWantsBuffer[:0]
 		for _, c := range unsent {
-			// If we've already sent a want to this peer, skip them.
-			if !pws.wantBlocks.Has(c) && !pws.wantHaves.Has(c) {
+			// If we've already sent a want to this peer,
+			// or we are above the degre, skip them.
+			if !pws.wantBlocks.Has(c) && !pws.wantHaves.Has(c) &&
+				peerForCid[c] < int(sessR.RelayRegistry.Degree) {
 				peerUnsent = append(peerUnsent, c)
+				peerForCid[c]++
 			}
 		}
 
 		if len(peerUnsent) > 0 {
 			for _, c := range peerUnsent {
-				pws.peerQueue.AddBroadcastWantHaves([]cid.Cid{c}, registry.GetTTL(c))
+				pws.peerQueue.AddBroadcastWantHaves([]cid.Cid{c}, sessR.RelayRegistry.GetTTL(c))
 			}
 		}
 	}

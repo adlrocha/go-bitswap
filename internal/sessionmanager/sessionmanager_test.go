@@ -70,11 +70,12 @@ type fakePeerManager struct {
 	cancels []cid.Cid
 }
 
-func (*fakePeerManager) RegisterSession(peer.ID, bspm.Session)                             {}
-func (*fakePeerManager) UnregisterSession(uint64)                                          {}
-func (*fakePeerManager) SendWants(context.Context, peer.ID, []cid.Cid, []cid.Cid, int32)   {}
-func (*fakePeerManager) BroadcastWantHaves(context.Context, []cid.Cid, int32)              {}
-func (*fakePeerManager) BroadcastRelayWants(context.Context, *rs.RelayRegistry, []cid.Cid) {}
+func (*fakePeerManager) RegisterSession(peer.ID, bspm.Session)                           {}
+func (*fakePeerManager) UnregisterSession(uint64)                                        {}
+func (*fakePeerManager) SendWants(context.Context, peer.ID, []cid.Cid, []cid.Cid, int32) {}
+func (*fakePeerManager) BroadcastWantHaves(context.Context, []cid.Cid, int32)            {}
+func (*fakePeerManager) BroadcastRelayWants(context.Context, *rs.SessionRegistries, []cid.Cid) {
+}
 func (fpm *fakePeerManager) SendCancels(ctx context.Context, cancels []cid.Cid) {
 	fpm.lk.Lock()
 	defer fpm.lk.Unlock()

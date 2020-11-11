@@ -149,7 +149,7 @@ func (pm *fakePeerManager) BroadcastWantHaves(ctx context.Context, cids []cid.Ci
 	}
 }
 
-func (pm *fakePeerManager) BroadcastRelayWants(ctx context.Context, r *rs.RelayRegistry, cids []cid.Cid) {
+func (pm *fakePeerManager) BroadcastRelayWants(ctx context.Context, r *rs.SessionRegistries, cids []cid.Cid) {
 	select {
 	case pm.wantReqs <- wantReq{cids}:
 	case <-ctx.Done():

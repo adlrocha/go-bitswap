@@ -17,9 +17,8 @@ import (
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	loggables "github.com/libp2p/go-libp2p-loggables"
 
-	"go.uber.org/zap"
-
 	pbr "github.com/ipfs/go-bitswap/internal/peerblockregistry"
+	"go.uber.org/zap"
 )
 
 var log = logging.Logger("bs:sess")
@@ -46,7 +45,7 @@ type PeerManager interface {
 	BroadcastWantHaves(context.Context, []cid.Cid, int32)
 	// SendCancels tells the PeerManager to send cancels to all peers
 	SendCancels(context.Context, []cid.Cid)
-	BroadcastRelayWants(context.Context, *rs.RelayRegistry, []cid.Cid)
+	BroadcastRelayWants(context.Context, *rs.SessionRegistries, []cid.Cid)
 }
 
 // SessionManager manages all the sessions
@@ -142,10 +141,8 @@ type Session struct {
 	// Used to implement relay sessions for ttl
 	ttl   int32
 	relay bool // Determines if the session is relay (so blocks are not stored).
-	// RelayRegistry used to perform relay decisions.
-	relayRegistry *rs.RelayRegistry
-	// Peer Block Registry to be used
-	peerBlockRegistry pbr.PeerBlockRegistry
+	// SessionRegistries
+	sessR *rs.SessionRegistries
 }
 
 // New creates a new bitswap session whose lifetime is bounded by the
@@ -190,8 +187,7 @@ func New(
 		self:                self,
 		ttl:                 ttl,
 		relay:               relay,
-		relayRegistry:       relayRegistry,
-		peerBlockRegistry:   peerBlockRegistry,
+		sessR:               &rs.SessionRegistries{relayRegistry, peerBlockRegistry},
 	}
 	s.sws = newSessionWantSender(id, pm, sprm, sm, bpm, s.onWantsSent, s.onPeersExhausted, s.ttl)
 
@@ -523,15 +519,15 @@ func (s *Session) wantBlocks(ctx context.Context, newks []cid.Cid) {
 		ks := s.sw.GetNextWants()
 		if len(ks) > 0 {
 			log.Infow("Broadcasting relays", "session", s.id, "want-count", len(ks))
-			s.broadcastRelayWants(ctx, s.relayRegistry, ks)
+			s.broadcastRelayWants(ctx, ks)
 		}
 	}
 }
 
 // Send want-haves to all connected peers
-func (s *Session) broadcastRelayWants(ctx context.Context, registry *rs.RelayRegistry, wants []cid.Cid) {
+func (s *Session) broadcastRelayWants(ctx context.Context, wants []cid.Cid) {
 	log.Debugw("broadcastWantHaves", "session", s.id, "cids", wants)
-	s.pm.BroadcastRelayWants(ctx, registry, wants)
+	s.pm.BroadcastRelayWants(ctx, s.sessR, wants)
 }
 
 // Send want-haves to all connected peers
@@ -544,13 +540,13 @@ func (s *Session) broadcastWantHaves(ctx context.Context, wants []cid.Cid) {
 func (s *Session) broadcastWantBlocksPBR(ctx context.Context, wants []cid.Cid) bool {
 	log.Debugw("broadcastWantBlockPBR", "session", s.id, "cids", wants)
 	// If nil peerBlockRegistry return
-	if s.peerBlockRegistry == nil {
+	if s.sessR.PeerBlockRegistry == nil {
 		return false
 	}
 
 	for _, w := range wants {
 		// Get latest peers that sent that want message
-		candidates := s.peerBlockRegistry.GetCandidates(w)
+		candidates := s.sessR.PeerBlockRegistry.GetCandidates(w)
 		log.Debugw("broadcastWantBlockPBR", "session", s.id, "candidates", len(candidates))
 		// If no candidates return false so we broadcast WANT-HAVES
 		if len(candidates) == 0 {

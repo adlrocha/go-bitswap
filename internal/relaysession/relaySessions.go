@@ -8,6 +8,8 @@ import (
 	exchange "github.com/ipfs/go-ipfs-exchange-interface"
 	logging "github.com/ipfs/go-log"
 	peer "github.com/libp2p/go-libp2p-core/peer"
+
+	pbr "github.com/ipfs/go-bitswap/internal/peerblockregistry"
 )
 
 var log = logging.Logger("relaysession")
@@ -24,6 +26,16 @@ type RelaySession struct {
 	// We could add here the PeerBlockRegistry to start making decisions
 	// also with the information tracked from want messages.
 	// PeerBlockRegistry
+}
+
+// SessionRegistries data structures used to perform relay session decisions
+// The PeerBlockRegistry is also used for direct sessions to perform broadcast
+// decisions.
+type SessionRegistries struct {
+	// RelayRegistry used to perform relay decisions.
+	RelayRegistry *RelayRegistry
+	// Peer Block Registry to be used
+	PeerBlockRegistry pbr.PeerBlockRegistry
 }
 
 func NewRelaySession(degree int32) *RelaySession {
