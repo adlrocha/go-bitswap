@@ -37,6 +37,8 @@ import (
 	process "github.com/jbenet/goprocess"
 	procctx "github.com/jbenet/goprocess/context"
 	peer "github.com/libp2p/go-libp2p-core/peer"
+
+	pbr "github.com/ipfs/go-bitswap/internal/peerblockregistry"
 )
 
 var log = logging.Logger("bitswap")
@@ -67,6 +69,14 @@ var (
 // Option defines the functional option type that can be used to configure
 // bitswap instances
 type Option func(*Bitswap)
+
+// PeerBlockRegistryEnabled to use peerBlockRegistry
+func PeerBlockRegistryEnabled(pbrEnabled bool) Option {
+	return func(bs *Bitswap) {
+		bs.pbrEnabled = pbrEnabled
+		bs.engine.SetPBR(pbrEnabled)
+	}
+}
 
 // ProvideEnabled is an option for enabling/disabling provide announcements
 func ProvideEnabled(enabled bool) Option {
@@ -158,6 +168,9 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 	pm := bspm.New(ctx, peerQueueFactory, network.Self())
 	pqm := bspqm.New(ctx, network)
 
+	// TODO: Should make pbr type configurable
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("flat")
+
 	sessionFactory := func(
 		sessctx context.Context,
 		sessmgr bssession.SessionManager,
@@ -172,15 +185,16 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 		self peer.ID,
 		ttl int32,
 		relay bool,
-		relayRegistry *rs.RelayRegistry) bssm.Session {
-		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self, ttl, relay, relayRegistry)
+		relayRegistry *rs.RelayRegistry,
+		peerBlockRegistry pbr.PeerBlockRegistry) bssm.Session {
+		return bssession.New(sessctx, sessmgr, id, spm, pqm, sim, pm, bpm, notif, provSearchDelay, rebroadcastDelay, self, ttl, relay, relayRegistry, peerBlockRegistry)
 	}
 	sessionPeerManagerFactory := func(ctx context.Context, id uint64) bssession.SessionPeerManager {
 		return bsspm.New(id, network.ConnectionManager())
 	}
 	notif := notifications.New()
-	sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self())
-	engine := decision.NewEngine(ctx, bstore, network.ConnectionManager(), network.Self(), sm)
+	sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self(), peerBlockRegistry)
+	engine := decision.NewEngine(ctx, bstore, network.ConnectionManager(), network.Self(), sm, peerBlockRegistry)
 
 	bs := &Bitswap{
 		blockstore:       bstore,
@@ -202,6 +216,7 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 		provSearchDelay:  defaultProvSearchDelay,
 		rebroadcastDelay: delay.Fixed(time.Minute),
 		ttl:              defaultTTL,
+		pbrEnabled:       true,
 	}
 
 	// apply functional options before starting and running bitswap
@@ -287,6 +302,8 @@ type Bitswap struct {
 
 	// Initial TTL used for bitswap messages
 	ttl int32
+	// Enables the use of peerBlockRegistry
+	pbrEnabled bool
 }
 
 type counters struct {

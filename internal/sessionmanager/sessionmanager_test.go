@@ -10,6 +10,7 @@ import (
 
 	bsbpm "github.com/ipfs/go-bitswap/internal/blockpresencemanager"
 	notifications "github.com/ipfs/go-bitswap/internal/notifications"
+	pbr "github.com/ipfs/go-bitswap/internal/peerblockregistry"
 	bspm "github.com/ipfs/go-bitswap/internal/peermanager"
 	rs "github.com/ipfs/go-bitswap/internal/relaysession"
 	bssession "github.com/ipfs/go-bitswap/internal/session"
@@ -98,7 +99,8 @@ func sessionFactory(ctx context.Context,
 	self peer.ID,
 	ttl int32,
 	relay bool,
-	relayRegistry *rs.RelayRegistry) Session {
+	relayRegistry *rs.RelayRegistry,
+	peerBlockRegistry pbr.PeerBlockRegistry) Session {
 	fs := &fakeSession{
 		id:    id,
 		pm:    sprm.(*fakeSesPeerManager),
@@ -127,7 +129,9 @@ func TestReceiveFrom(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
+
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
@@ -174,8 +178,9 @@ func TestReceiveBlocksWhenManagerShutdown(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
 
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
 
@@ -208,8 +213,9 @@ func TestReceiveBlocksWhenSessionContextCancelled(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
 
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
 
@@ -244,8 +250,9 @@ func TestShutdown(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
 
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))
 	cids := []cid.Cid{block.Cid()}
@@ -279,7 +286,8 @@ func TestReceiveFromRelaySesesion(t *testing.T) {
 	sim := bssim.New()
 	bpm := bsbpm.New()
 	pm := &fakePeerManager{}
-	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "")
+	peerBlockRegistry := pbr.NewPeerBlockRegistry("hamt")
+	sm := New(ctx, sessionFactory, sim, peerManagerFactory, bpm, pm, notif, "", peerBlockRegistry)
 
 	p := peer.ID(123)
 	block := blocks.NewBlock([]byte("block"))

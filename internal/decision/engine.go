@@ -24,6 +24,8 @@ import (
 	"github.com/ipfs/go-peertaskqueue/peertask"
 	process "github.com/jbenet/goprocess"
 	peer "github.com/libp2p/go-libp2p-core/peer"
+
+	pbr "github.com/ipfs/go-bitswap/internal/peerblockregistry"
 )
 
 // TODO consider taking responsibility for other types of requests. For
@@ -181,20 +183,24 @@ type Engine struct {
 
 	sendDontHaves bool
 
+	pbrEnabled bool
+
 	self peer.ID
 
 	// RelaySession to manage relay requests.
 	relaySession *rs.RelaySession
+	// data structure used to track inspected want messages.
+	peerBlockRegistry pbr.PeerBlockRegistry
 }
 
 // NewEngine creates a new block sending engine for the given block store
-func NewEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger, self peer.ID, sm *bssm.SessionManager) *Engine {
-	return newEngine(ctx, bs, peerTagger, self, maxBlockSizeReplaceHasWithBlock, nil, sm)
+func NewEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger, self peer.ID, sm *bssm.SessionManager, peerBlockRegistry pbr.PeerBlockRegistry) *Engine {
+	return newEngine(ctx, bs, peerTagger, self, maxBlockSizeReplaceHasWithBlock, nil, sm, peerBlockRegistry)
 }
 
 // This constructor is used by the tests
 func newEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger, self peer.ID,
-	maxReplaceSize int, scoreLedger ScoreLedger, sm *bssm.SessionManager) *Engine {
+	maxReplaceSize int, scoreLedger ScoreLedger, sm *bssm.SessionManager, peerBlockRegistry pbr.PeerBlockRegistry) *Engine {
 
 	e := &Engine{
 		ledgerMap:                       make(map[peer.ID]*ledger),
@@ -210,6 +216,8 @@ func newEngine(ctx context.Context, bs bstore.Blockstore, peerTagger PeerTagger,
 		self:                            self,
 		sm:                              sm,
 		relaySession:                    rs.NewRelaySession(defaultRelayDegree),
+		peerBlockRegistry:               peerBlockRegistry,
+		pbrEnabled:                      true,
 	}
 	e.tagQueued = fmt.Sprintf(tagFormat, "queued", uuid.New().String())
 	e.tagUseful = fmt.Sprintf(tagFormat, "useful", uuid.New().String())
@@ -255,6 +263,13 @@ func (e *Engine) startScoreLedger(px process.Process) {
 		<-ppx.Closing()
 		e.scoreLedger.Stop()
 	})
+}
+
+// SetPBR sets the use of peer-block registry. This data structure tracks
+// the want messages exchange by neighbors and use this information to send
+// a WANT-BLOCK with the WANT-HAVEs when starting a session.
+func (e *Engine) SetPBR(pbrEnabled bool) {
+	e.pbrEnabled = pbrEnabled
 }
 
 // Start up workers to handle requests from other nodes for the data on this node
@@ -545,6 +560,11 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 
 		// Add each want-have / want-block to the ledger
 		l.Wants(c, entry.Priority, entry.WantType, entry.TTL)
+
+		// If enabled, Update peerblockregistry here.
+		if e.pbrEnabled {
+			e.peerBlockRegistry.UpdateRegistry(p, c, entry.Priority)
+		}
 
 		// If the block was not found
 		if !found {

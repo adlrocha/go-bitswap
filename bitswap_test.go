@@ -488,6 +488,7 @@ func TestBasicBitswap(t *testing.T) {
 
 	t.Log("stat node 2")
 	assertStat(t, st2, 0, 0, 0, 0)
+	t.Log(st2)
 
 	if !bytes.Equal(blk.RawData(), blocks[0].RawData()) {
 		t.Errorf("blocks aren't equal: expected %v, actual %v", blocks[0].RawData(), blk.RawData())
