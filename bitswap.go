@@ -66,7 +66,7 @@ var (
 	// "none": No compression used.
 	// "blocks": Only raw data of blocks is compressed,
 	// "full": Full message compressed.
-	defaultCompressionStrategy = "none"
+	defaultCompressionStrategy = "full"
 )
 
 // Option defines the functional option type that can be used to configure
