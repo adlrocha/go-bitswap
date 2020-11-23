@@ -1,9 +1,9 @@
 module github.com/ipfs/go-bitswap
 
 require (
+	contrib.go.opencensus.io/exporter/jaeger v0.2.1
 	github.com/cskr/pubsub v1.0.2
 	github.com/gogo/protobuf v1.3.1
-	github.com/golang/protobuf v1.3.2 // indirect
 	github.com/google/uuid v1.1.1
 	github.com/ipfs/go-block-format v0.0.2
 	github.com/ipfs/go-cid v0.0.5
@@ -28,6 +28,7 @@ require (
 	github.com/libp2p/go-msgio v0.0.4
 	github.com/multiformats/go-multiaddr v0.2.1
 	github.com/multiformats/go-multistream v0.1.1
+	go.opencensus.io v0.22.4
 	go.uber.org/zap v1.14.1
 )
 
