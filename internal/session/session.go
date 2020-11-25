@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	bsbpm "github.com/ipfs/go-bitswap/internal/blockpresencemanager"
@@ -15,6 +16,7 @@ import (
 	logging "github.com/ipfs/go-log"
 	peer "github.com/libp2p/go-libp2p-core/peer"
 	loggables "github.com/libp2p/go-libp2p-loggables"
+	"go.opencensus.io/trace"
 	"go.uber.org/zap"
 )
 
@@ -49,6 +51,7 @@ type SessionManager interface {
 	RemoveSession(sesid uint64)
 	// Cancel wants (called when a call to GetBlocks() is cancelled)
 	CancelSessionWants(sid uint64, wants []cid.Cid)
+	GetParentSpan() *trace.Span
 }
 
 // SessionPeerManager keeps track of peers in the session
@@ -132,6 +135,7 @@ type Session struct {
 	id    uint64
 
 	self peer.ID
+	span *trace.Span
 }
 
 // New creates a new bitswap session whose lifetime is bounded by the
@@ -150,6 +154,7 @@ func New(
 	periodicSearchDelay delay.D,
 	self peer.ID) *Session {
 
+	ctx, span := trace.StartSpanWithRemoteParent(ctx, "sessionID."+strconv.FormatUint(id, 10), sm.GetParentSpan().SpanContext())
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Session{
 		sw:                  newSessionWants(broadcastLiveWantsLimit),
@@ -170,6 +175,7 @@ func New(
 		initialSearchDelay:  initialSearchDelay,
 		periodicSearchDelay: periodicSearchDelay,
 		self:                self,
+		span:                span,
 	}
 	s.sws = newSessionWantSender(id, pm, sprm, sm, bpm, s.onWantsSent, s.onPeersExhausted)
 
@@ -292,6 +298,14 @@ func (s *Session) nonBlockingEnqueue(o op) {
 	}
 }
 
+func annotateKeys(span *trace.Span, ks []cid.Cid, status string) {
+	for _, c := range ks {
+		span.Annotate([]trace.Attribute{
+			trace.StringAttribute("session.key."+status, c.String()),
+		}, "Key in session")
+	}
+}
+
 // Session run loop -- everything in this function should not be called
 // outside of this loop
 func (s *Session) run(ctx context.Context) {
@@ -299,7 +313,11 @@ func (s *Session) run(ctx context.Context) {
 
 	s.idleTick = time.NewTimer(s.initialSearchDelay)
 	s.periodicSearchTimer = time.NewTimer(s.periodicSearchDelay.NextWaitTime())
+	ctx, span := trace.StartSpan(ctx, "session.loop")
+	defer span.End()
+
 	for {
+		ctx, span := trace.StartSpan(ctx, "session.tick")
 		select {
 		case oper := <-s.incoming:
 			switch oper.op {
@@ -309,6 +327,7 @@ func (s *Session) run(ctx context.Context) {
 			case opWant:
 				// Client wants blocks
 				s.wantBlocks(ctx, oper.keys)
+				annotateKeys(span, oper.keys, "WANT-BLOCK")
 			case opCancel:
 				// Wants were cancelled
 				s.sw.CancelPending(oper.keys)
@@ -316,9 +335,11 @@ func (s *Session) run(ctx context.Context) {
 			case opWantsSent:
 				// Wants were sent to a peer
 				s.sw.WantsSent(oper.keys)
+				annotateKeys(span, oper.keys, "WANTs")
 			case opBroadcast:
 				// Broadcast want-haves to all peers
 				s.broadcast(ctx, oper.keys)
+				annotateKeys(span, oper.keys, "Broadcast")
 			default:
 				panic("unhandled operation")
 			}
@@ -336,6 +357,13 @@ func (s *Session) run(ctx context.Context) {
 			s.handleShutdown()
 			return
 		}
+
+		for _, p := range s.sprm.Peers() {
+			span.Annotate([]trace.Attribute{
+				trace.StringAttribute("session.peer", p.Pretty()),
+			}, "List of peers in session")
+		}
+		span.End()
 	}
 }
 
@@ -370,7 +398,7 @@ func (s *Session) broadcast(ctx context.Context, wants []cid.Cid) {
 }
 
 // handlePeriodicSearch is called periodically to search for providers of a
-// randomly chosen CID in the sesssion.
+// randomly chosen CID in the session.
 func (s *Session) handlePeriodicSearch(ctx context.Context) {
 	randomWant := s.sw.RandomLiveWant()
 	if !randomWant.Defined() {
@@ -413,6 +441,7 @@ func (s *Session) handleShutdown() {
 	// Signal to the SessionManager that the session has been shutdown
 	// and can be cleaned up
 	s.sm.RemoveSession(s.id)
+	s.span.End()
 }
 
 // Update times that we resorted to the DHT

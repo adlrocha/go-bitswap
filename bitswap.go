@@ -174,7 +174,7 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 		return bsspm.New(id, network.ConnectionManager())
 	}
 	notif := notifications.New()
-	sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self())
+	sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self(), span)
 	engine := decision.NewEngine(ctx, bstore, network.ConnectionManager(), network.Self())
 
 	bs := &Bitswap{
@@ -618,7 +618,6 @@ func (bs *Bitswap) ReceiveError(err error) {
 
 // Close is called to shutdown Bitswap
 func (bs *Bitswap) Close() error {
-	bs.span.End()
 	jaeger.Flush()
 	return bs.process.Close()
 }
