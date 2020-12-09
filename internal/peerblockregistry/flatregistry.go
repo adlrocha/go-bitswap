@@ -21,6 +21,9 @@ func NewFlatRegistry() PeerBlockRegistry {
 // GetCandidates to send the WANT-BLOCK to, as we've received
 // a request for the CID from them
 func (fr *FlatRegistry) GetCandidates(cid cid.Cid) []peer.ID {
+	fr.pbrLk.RLock()
+	defer fr.pbrLk.RUnlock()
+
 	entries := fr.CidList[cid]
 	if len(entries) > numberWantBlocks {
 		entries = entries[:numberWantBlocks]
@@ -49,6 +52,8 @@ func (fr *FlatRegistry) UpdateRegistry(p peer.ID, cid cid.Cid, priority int32) e
 
 // Clear cleans the registry.
 func (fr *FlatRegistry) Clear() {
+	fr.pbrLk.Lock()
+	defer fr.pbrLk.Unlock()
 	*fr = FlatRegistry{
 		CidList: make(map[cid.Cid][]peer.ID),
 	}

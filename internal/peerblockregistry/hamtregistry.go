@@ -49,6 +49,8 @@ func (c *cidKey) Hash60() uint64 {
 // GetCandidates to send the WANT-BLOCK to, as we've received
 // a request for the CID from them
 func (hr *HAMTRegistry) GetCandidates(cid cid.Cid) []peer.ID {
+	hr.pbrLk.RLock()
+	defer hr.pbrLk.RUnlock()
 	key := stringkey.New(cid.String())
 	// key := &cidKey{cid: cid}
 
