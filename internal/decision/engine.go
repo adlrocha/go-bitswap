@@ -567,8 +567,9 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 			}
 			// Only add the task to the queue if the requester wants a DONT_HAVE
 			//
-			// We always send a DON'T HAVE right away even if we end up triggering
-			// and relaySession to minimize duplicates. If the relay session
+			// We always send a DON'T HAVE right away to minimize duplicates
+			// --even if we end up triggering a lookup in the relaySession--.
+			// If the relay session
 			// ends up finding the block it will send a HAVE message and update
 			// the requested accordingly. DON'T HAVEs are updatable through new
 			// BlockPresence information.
