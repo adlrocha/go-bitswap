@@ -11,6 +11,7 @@ import (
 	"time"
 
 	delay "github.com/ipfs/go-ipfs-delay"
+	"go.opencensus.io/trace"
 
 	deciface "github.com/ipfs/go-bitswap/decision"
 	bsbpm "github.com/ipfs/go-bitswap/internal/blockpresencemanager"
@@ -28,6 +29,7 @@ import (
 	bsmsg "github.com/ipfs/go-bitswap/message"
 	pb "github.com/ipfs/go-bitswap/message/pb"
 	bsnet "github.com/ipfs/go-bitswap/network"
+	tracing "github.com/ipfs/go-bitswap/tracing"
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
@@ -41,6 +43,9 @@ import (
 
 var log = logging.Logger("bitswap")
 var sflog = log.Desugar()
+
+// var jaeger = tracing.SetupJaegerTracing("bitswap" + time.Now().String())
+var jaeger = tracing.SetupJaegerTracing("bitswap")
 
 var _ exchange.SessionExchange = (*Bitswap)(nil)
 
@@ -119,7 +124,6 @@ func WithScoreLedger(scoreLedger deciface.ScoreLedger) Option {
 // delegate. Runs until context is cancelled or bitswap.Close is called.
 func New(parent context.Context, network bsnet.BitSwapNetwork,
 	bstore blockstore.Blockstore, options ...Option) exchange.Interface {
-
 	// important to use provided parent context (since it may include important
 	// loggable data). It's probably not a good idea to allow bitswap to be
 	// coupled to the concerns of the ipfs daemon in this way.
@@ -140,6 +144,9 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 	px := process.WithTeardown(func() error {
 		return nil
 	})
+
+	ctx, span := trace.StartSpan(ctx, network.Self().Pretty())
+	defer span.End()
 
 	// onDontHaveTimeout is called when a want-block is sent to a peer that
 	// has an old version of Bitswap that doesn't support DONT_HAVE messages,
@@ -179,7 +186,7 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 		return bsspm.New(id, network.ConnectionManager())
 	}
 	notif := notifications.New()
-	sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self())
+	sm = bssm.New(ctx, sessionFactory, sim, sessionPeerManagerFactory, bpm, pm, notif, network.Self(), span)
 	engine := decision.NewEngine(ctx, bstore, network.ConnectionManager(), network.Self(), sm)
 
 	bs := &Bitswap{
@@ -202,6 +209,7 @@ func New(parent context.Context, network bsnet.BitSwapNetwork,
 		provSearchDelay:  defaultProvSearchDelay,
 		rebroadcastDelay: delay.Fixed(time.Minute),
 		ttl:              defaultTTL,
+		span:             span,
 	}
 
 	// apply functional options before starting and running bitswap
@@ -286,7 +294,8 @@ type Bitswap struct {
 	rebroadcastDelay delay.D
 
 	// Initial TTL used for bitswap messages
-	ttl int32
+	ttl  int32
+	span *trace.Span
 }
 
 type counters struct {
@@ -450,6 +459,8 @@ func (bs *Bitswap) receiveBlocksFrom(ctx context.Context, from peer.ID, blks []b
 // ReceiveMessage is called by the network interface when a new message is
 // received.
 func (bs *Bitswap) ReceiveMessage(ctx context.Context, p peer.ID, incoming bsmsg.BitSwapMessage) {
+	ctx, span := trace.StartSpanWithRemoteParent(ctx, "bitswap.ReceiveMessage", bs.span.SpanContext())
+	defer span.End()
 	bs.counterLk.Lock()
 	bs.counters.messagesRecvd++
 	// Track all the data receiveid (including control messages)
@@ -467,6 +478,29 @@ func (bs *Bitswap) ReceiveMessage(ctx context.Context, p peer.ID, incoming bsmsg
 	}
 	// Add to stats the number of want messages received.
 	wantlist := incoming.Wantlist()
+
+	span.Annotate([]trace.Attribute{
+		trace.StringAttribute("source", p.Pretty()),
+	}, "Source of message")
+
+	for _, et := range wantlist {
+		if !et.Cancel {
+			if et.WantType == pb.Message_Wantlist_Have {
+				span.Annotate([]trace.Attribute{
+					trace.StringAttribute("WANT-HAVE", et.Cid.String()),
+				}, "WANT-HAVE")
+			} else {
+				span.Annotate([]trace.Attribute{
+					trace.StringAttribute("WANT-BLOCK", et.Cid.String()),
+				}, "WANT-BLOCK")
+			}
+		} else {
+			span.Annotate([]trace.Attribute{
+				trace.StringAttribute("CANCEL", et.Cid.String()),
+			}, "CANCEL")
+		}
+	}
+
 	bs.counterLk.Lock()
 	bs.counters.wantsRecvd += uint64(len(wantlist))
 	bs.counterLk.Unlock()
@@ -502,12 +536,25 @@ func (bs *Bitswap) ReceiveMessage(ctx context.Context, p peer.ID, incoming bsmsg
 	if len(iblocks) > 0 {
 		bs.updateReceiveCounters(iblocks)
 		for _, b := range iblocks {
+			span.Annotate([]trace.Attribute{
+				trace.StringAttribute("BLOCK", b.Cid().String()),
+			}, "BLOCK")
 			log.Debugf("[recv] block; cid=%s, peer=%s", b.Cid(), p)
 		}
 	}
 
 	haves := incoming.Haves()
+	for _, h := range haves {
+		span.Annotate([]trace.Attribute{
+			trace.StringAttribute("HAVE", h.String()),
+		}, "HAVE")
+	}
 	dontHaves := incoming.DontHaves()
+	for _, d := range dontHaves {
+		span.Annotate([]trace.Attribute{
+			trace.StringAttribute("DONT HAVE", d.String()),
+		}, "DONT HAVE")
+	}
 	if len(iblocks) > 0 || len(haves) > 0 || len(dontHaves) > 0 {
 		// Process blocks
 		err := bs.receiveBlocksFrom(ctx, p, iblocks, haves, dontHaves)
@@ -595,6 +642,7 @@ func (bs *Bitswap) ReceiveError(err error) {
 
 // Close is called to shutdown Bitswap
 func (bs *Bitswap) Close() error {
+	jaeger.Flush()
 	return bs.process.Close()
 }
 
