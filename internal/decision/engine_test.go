@@ -929,10 +929,10 @@ func TestSendReceivedBlocksToPeersThatWantThem(t *testing.T) {
 
 	blks := testutil.GenerateBlocksOfSize(4, 8*1024)
 	msg := message.New(false)
-	msg.AddEntry(blks[0].Cid(), 4, pb.Message_Wantlist_Have, false, 0)
-	msg.AddEntry(blks[1].Cid(), 3, pb.Message_Wantlist_Have, false, 0)
-	msg.AddEntry(blks[2].Cid(), 2, pb.Message_Wantlist_Block, false, 0)
-	msg.AddEntry(blks[3].Cid(), 1, pb.Message_Wantlist_Block, false, 0)
+	msg.AddEntry(blks[0].Cid(), 4, pb.Message_Wantlist_Have, false, 0, partner)
+	msg.AddEntry(blks[1].Cid(), 3, pb.Message_Wantlist_Have, false, 0, partner)
+	msg.AddEntry(blks[2].Cid(), 2, pb.Message_Wantlist_Block, false, 0, partner)
+	msg.AddEntry(blks[3].Cid(), 1, pb.Message_Wantlist_Block, false, 0, partner)
 	e.MessageReceived(context.Background(), partner, msg)
 
 	// Nothing in blockstore, so shouldn't get any envelope
@@ -975,10 +975,10 @@ func TestSendDontHave(t *testing.T) {
 	blks := testutil.GenerateBlocksOfSize(4, 8*1024)
 	msg := message.New(false)
 	// Usi ng TTL 0 the behavior of engine should be the same as before.
-	msg.AddEntry(blks[0].Cid(), 4, pb.Message_Wantlist_Have, false, 0)
-	msg.AddEntry(blks[1].Cid(), 3, pb.Message_Wantlist_Have, true, 0)
-	msg.AddEntry(blks[2].Cid(), 2, pb.Message_Wantlist_Block, false, 0)
-	msg.AddEntry(blks[3].Cid(), 1, pb.Message_Wantlist_Block, true, 0)
+	msg.AddEntry(blks[0].Cid(), 4, pb.Message_Wantlist_Have, false, 0, partner)
+	msg.AddEntry(blks[1].Cid(), 3, pb.Message_Wantlist_Have, true, 0, partner)
+	msg.AddEntry(blks[2].Cid(), 2, pb.Message_Wantlist_Block, false, 0, partner)
+	msg.AddEntry(blks[3].Cid(), 1, pb.Message_Wantlist_Block, true, 0, partner)
 	e.MessageReceived(context.Background(), partner, msg)
 
 	var next envChan
@@ -1039,13 +1039,13 @@ func TestWantlistForPeer(t *testing.T) {
 
 	blks := testutil.GenerateBlocksOfSize(4, 8*1024)
 	msg := message.New(false)
-	msg.AddEntry(blks[0].Cid(), 2, pb.Message_Wantlist_Have, false, defaultTTL)
-	msg.AddEntry(blks[1].Cid(), 3, pb.Message_Wantlist_Have, false, defaultTTL)
+	msg.AddEntry(blks[0].Cid(), 2, pb.Message_Wantlist_Have, false, defaultTTL, partner)
+	msg.AddEntry(blks[1].Cid(), 3, pb.Message_Wantlist_Have, false, defaultTTL, partner)
 	e.MessageReceived(context.Background(), partner, msg)
 
 	msg2 := message.New(false)
-	msg2.AddEntry(blks[2].Cid(), 1, pb.Message_Wantlist_Block, false, defaultTTL)
-	msg2.AddEntry(blks[3].Cid(), 4, pb.Message_Wantlist_Block, false, defaultTTL)
+	msg2.AddEntry(blks[2].Cid(), 1, pb.Message_Wantlist_Block, false, defaultTTL, partner)
+	msg2.AddEntry(blks[3].Cid(), 4, pb.Message_Wantlist_Block, false, defaultTTL, partner)
 	e.MessageReceived(context.Background(), partner, msg2)
 
 	entries := e.WantlistForPeer(otherPeer)
@@ -1150,7 +1150,7 @@ func partnerWantBlocks(e *Engine, keys []string, partner peer.ID) {
 	add := message.New(false)
 	for i, letter := range keys {
 		block := blocks.NewBlock([]byte(letter))
-		add.AddEntry(block.Cid(), int32(len(keys)-i), pb.Message_Wantlist_Block, true, defaultTTL)
+		add.AddEntry(block.Cid(), int32(len(keys)-i), pb.Message_Wantlist_Block, true, defaultTTL, partner)
 	}
 	e.MessageReceived(context.Background(), partner, add)
 }
@@ -1160,12 +1160,12 @@ func partnerWantBlocksHaves(e *Engine, keys []string, wantHaves []string, sendDo
 	priority := int32(len(wantHaves) + len(keys))
 	for _, letter := range wantHaves {
 		block := blocks.NewBlock([]byte(letter))
-		add.AddEntry(block.Cid(), priority, pb.Message_Wantlist_Have, sendDontHave, defaultTTL)
+		add.AddEntry(block.Cid(), priority, pb.Message_Wantlist_Have, sendDontHave, defaultTTL, partner)
 		priority--
 	}
 	for _, letter := range keys {
 		block := blocks.NewBlock([]byte(letter))
-		add.AddEntry(block.Cid(), priority, pb.Message_Wantlist_Block, sendDontHave, defaultTTL)
+		add.AddEntry(block.Cid(), priority, pb.Message_Wantlist_Block, sendDontHave, defaultTTL, partner)
 		priority--
 	}
 	e.MessageReceived(context.Background(), partner, add)

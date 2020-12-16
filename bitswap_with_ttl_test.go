@@ -14,7 +14,6 @@ import (
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
 	delay "github.com/ipfs/go-ipfs-delay"
-	logging "github.com/ipfs/go-log"
 	"golang.org/x/sync/errgroup"
 
 	bsnet "github.com/ipfs/go-bitswap/network"
@@ -27,7 +26,10 @@ import (
 )
 
 func TestRelaySessionTTL1(t *testing.T) {
-	logging.SetLogLevel("engine", "DEBUG")
+	// logging.SetLogLevel("bitswap", "DEBUG")
+	// logging.SetLogLevel("engine", "DEBUG")
+	// logging.SetLogLevel("relaysession", "DEBUG")
+
 	// If you change the TTL to zero the test should timeout because
 	// there is no direct connection between peers.
 	var ttl int32 = 1
@@ -95,6 +97,7 @@ func TestRelaySessionTTL1(t *testing.T) {
 		t.Fatal(err)
 	}
 	fmt.Println(peerB.Exchange.Stat())
+	// t.Fatal()
 }
 
 func TestRelaySessionTTL2(t *testing.T) {
@@ -219,7 +222,7 @@ func CreateBitswapNode(ctx context.Context, h host.Host, opts []bitswap.Option) 
 }
 
 func TestRelayRealNet(t *testing.T) {
-	logging.SetLogLevel("engine", "DEBUG")
+	// logging.SetLogLevel("engine", "DEBUG")
 	// logging.SetLogLevel("bitswap", "DEBUG")
 	var ttl int32 = 2
 	bsOpts := []bitswap.Option{
@@ -281,8 +284,8 @@ func SetupConnections(ctx context.Context, self host.Host, others []host.Host) e
 }
 
 func TestComplexTopology(t *testing.T) {
-	logging.SetLogLevel("engine", "DEBUG")
-	logging.SetLogLevel("bitswap", "DEBUG")
+	// logging.SetLogLevel("engine", "DEBUG")
+	// logging.SetLogLevel("bitswap", "DEBUG")
 
 	var ttl int32 = 1
 	bsOpts := []bitswap.Option{
@@ -382,6 +385,7 @@ func ClearBlockstore(ctx context.Context, bstore blockstore.Blockstore) error {
 func TestComplexTopologyAndWaves(t *testing.T) {
 	// logging.SetLogLevel("engine", "DEBUG")
 	// logging.SetLogLevel("bitswap", "DEBUG")
+	// logging.SetLogLevel("relaysession", "DEBUG")
 
 	var ttl int32 = 1
 	bsOpts := []bitswap.Option{
@@ -408,7 +412,7 @@ func TestComplexTopologyAndWaves(t *testing.T) {
 
 	// bg := blocksutil.NewBlockGenerator()
 	// blks := bg.Blocks(1)
-	blks := GenerateBlocksOfSize(6, 123456)
+	blks := GenerateBlocksOfSize(3, 123456)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()

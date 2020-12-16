@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	pb "github.com/ipfs/go-bitswap/message/pb"
+	peer "github.com/libp2p/go-libp2p-peer"
 
 	cid "github.com/ipfs/go-cid"
 )
@@ -21,15 +22,17 @@ type Entry struct {
 	Priority int32
 	WantType pb.Message_Wantlist_WantType
 	TTL      int32
+	Source   peer.ID
 }
 
 // NewRefEntry creates a new reference tracked wantlist entry.
-func NewRefEntry(c cid.Cid, p int32, ttl int32) Entry {
+func NewRefEntry(c cid.Cid, p int32, ttl int32, source peer.ID) Entry {
 	return Entry{
 		Cid:      c,
 		Priority: p,
 		WantType: pb.Message_Wantlist_Block,
 		TTL:      ttl,
+		Source:   source,
 	}
 }
 
@@ -52,7 +55,7 @@ func (w *Wantlist) Len() int {
 }
 
 // Add adds an entry in a wantlist from CID & Priority, if not already present.
-func (w *Wantlist) Add(c cid.Cid, priority int32, wantType pb.Message_Wantlist_WantType, ttl int32) bool {
+func (w *Wantlist) Add(c cid.Cid, priority int32, wantType pb.Message_Wantlist_WantType, ttl int32, source peer.ID) bool {
 	e, ok := w.set[c]
 
 	// Adding want-have should not override want-block
@@ -65,6 +68,7 @@ func (w *Wantlist) Add(c cid.Cid, priority int32, wantType pb.Message_Wantlist_W
 		Priority: priority,
 		WantType: wantType,
 		TTL:      ttl,
+		Source:   source,
 	}
 
 	return true
@@ -117,7 +121,7 @@ func (w *Wantlist) Entries() []Entry {
 // Absorb all the entries in other into this want list
 func (w *Wantlist) Absorb(other *Wantlist) {
 	for _, e := range other.Entries() {
-		w.Add(e.Cid, e.Priority, e.WantType, e.TTL)
+		w.Add(e.Cid, e.Priority, e.WantType, e.TTL, e.Source)
 	}
 }
 

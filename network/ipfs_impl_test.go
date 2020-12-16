@@ -24,6 +24,8 @@ import (
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 )
 
+var pid, _ = peer.Decode("QmXpBrpV7YgQSUVG7wAmAgRhQsK8AuJh6X2VXztgSorPz3")
+
 // Receiver is an interface for receiving messages from the GraphSyncNetwork.
 type receiver struct {
 	peers           map[peer.ID]struct{}
@@ -204,7 +206,7 @@ func TestMessageSendAndReceive(t *testing.T) {
 	block1 := blockGenerator.Next()
 	block2 := blockGenerator.Next()
 	sent := bsmsg.New(false)
-	sent.AddEntry(block1.Cid(), 1, pb.Message_Wantlist_Block, true, 1)
+	sent.AddEntry(block1.Cid(), 1, pb.Message_Wantlist_Block, true, 1, pid)
 	sent.AddBlock(block2)
 
 	err = bsnet1.SendMessage(ctx, p2.ID(), sent)
@@ -309,7 +311,7 @@ func prepareNetwork(t *testing.T, ctx context.Context, p1 tnet.Identity, r1 *rec
 	blockGenerator := blocksutil.NewBlockGenerator()
 	block1 := blockGenerator.Next()
 	msg := bsmsg.New(false)
-	msg.AddEntry(block1.Cid(), 1, pb.Message_Wantlist_Block, true, 1)
+	msg.AddEntry(block1.Cid(), 1, pb.Message_Wantlist_Block, true, 1, pid)
 
 	return eh1, bsnet1, eh2, bsnet2, msg
 }

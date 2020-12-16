@@ -157,6 +157,7 @@ func TestStartupAndShutdown(t *testing.T) {
 	fakeSender := newFakeMessageSender(resetChan, messagesSent, true)
 	fakenet := &fakeMessageNetwork{nil, nil, fakeSender}
 	peerID := testutil.GeneratePeers(1)[0]
+
 	messageQueue := New(ctx, peerID, fakenet, mockTimeoutCb, defaultTTL)
 	bcstwh := testutil.GenerateCids(10)
 
@@ -238,6 +239,7 @@ func TestSendingMessagesPriority(t *testing.T) {
 	fakenet := &fakeMessageNetwork{nil, nil, fakeSender}
 	peerID := testutil.GeneratePeers(1)[0]
 	messageQueue := New(ctx, peerID, fakenet, mockTimeoutCb, defaultTTL)
+
 	wantHaves1 := testutil.GenerateCids(5)
 	wantHaves2 := testutil.GenerateCids(5)
 	wantHaves := append(wantHaves1, wantHaves2...)
@@ -400,6 +402,7 @@ func TestWantlistRebroadcast(t *testing.T) {
 	fakeSender := newFakeMessageSender(resetChan, messagesSent, true)
 	fakenet := &fakeMessageNetwork{nil, nil, fakeSender}
 	peerID := testutil.GeneratePeers(1)[0]
+
 	messageQueue := New(ctx, peerID, fakenet, mockTimeoutCb, defaultTTL)
 	bcstwh := testutil.GenerateCids(10)
 	wantHaves := testutil.GenerateCids(10)
@@ -750,7 +753,6 @@ func filterWantTypes(wantlist []bsmsg.Entry) ([]cid.Cid, []cid.Cid, []cid.Cid) {
 // Simplistic benchmark to allow us to simulate conditions on the gateways
 func BenchmarkMessageQueue(b *testing.B) {
 	ctx := context.Background()
-
 	createQueue := func() *MessageQueue {
 		messagesSent := make(chan []bsmsg.Entry)
 		resetChan := make(chan struct{}, 1)

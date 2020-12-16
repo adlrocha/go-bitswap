@@ -14,6 +14,8 @@ import (
 var blockGenerator = blocksutil.NewBlockGenerator()
 var prioritySeq int32
 
+var pid, _ = peer.Decode("QmXpBrpV7YgQSUVG7wAmAgRhQsK8AuJh6X2VXztgSorPz3")
+
 // GenerateBlocksOfSize generates a series of blocks of the given byte size
 func GenerateBlocksOfSize(n int, size int64) []blocks.Block {
 	generatedBlocks := make([]blocks.Block, 0, n)
@@ -44,7 +46,7 @@ func GenerateMessageEntries(n int, isCancel bool) []bsmsg.Entry {
 	for i := 0; i < n; i++ {
 		prioritySeq++
 		msg := bsmsg.Entry{
-			Entry:  wantlist.NewRefEntry(blockGenerator.Next().Cid(), prioritySeq, 2),
+			Entry:  wantlist.NewRefEntry(blockGenerator.Next().Cid(), prioritySeq, 2, pid),
 			Cancel: isCancel,
 		}
 		bsmsgs = append(bsmsgs, msg)

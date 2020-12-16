@@ -19,6 +19,7 @@ message Message {
       WantType wantType = 4; // Note: defaults to enum 0, ie Block
       bool sendDontHave = 5; // Note: defaults to false
       int32 TTL = 6;  // WANT message TTL.
+      bytes source = 7; // Source peer of the request.
 		}
 
     repeated Entry entries = 1 [(gogoproto.nullable) = false];	// a list of wantlist entries

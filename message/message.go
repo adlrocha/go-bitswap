@@ -11,6 +11,8 @@ import (
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	pool "github.com/libp2p/go-buffer-pool"
+	corepeer "github.com/libp2p/go-libp2p-core/peer"
+	peer "github.com/libp2p/go-libp2p-peer"
 	msgio "github.com/libp2p/go-msgio"
 
 	u "github.com/ipfs/go-ipfs-util"
@@ -38,7 +40,9 @@ type BitSwapMessage interface {
 	PendingBytes() int32
 
 	// AddEntry adds an entry to the Wantlist.
-	AddEntry(key cid.Cid, priority int32, wantType pb.Message_Wantlist_WantType, sendDontHave bool, ttl int32) int
+	AddEntry(key cid.Cid, priority int32,
+		wantType pb.Message_Wantlist_WantType,
+		sendDontHave bool, ttl int32, source peer.ID) int
 
 	// Cancel adds a CANCEL for the given CID to the message
 	// Returns the size of the CANCEL entry in the protobuf
@@ -121,6 +125,7 @@ func (e *Entry) ToPB() pb.Message_Wantlist_Entry {
 		WantType:     e.WantType,
 		SendDontHave: e.SendDontHave,
 		TTL:          e.TTL,
+		Source:       []byte(e.Source.String()),
 	}
 }
 
@@ -196,6 +201,7 @@ func (m *impl) Reset(full bool) {
 }
 
 var errCidMissing = errors.New("missing cid")
+var errWrongPeer = errors.New("wrong peerID for source")
 
 func newMessageFromProto(pbm pb.Message) (BitSwapMessage, error) {
 	m := newMsg(pbm.Wantlist.Full)
@@ -203,7 +209,11 @@ func newMessageFromProto(pbm pb.Message) (BitSwapMessage, error) {
 		if !e.Block.Cid.Defined() {
 			return nil, errCidMissing
 		}
-		m.addEntry(e.Block.Cid, e.Priority, e.Cancel, e.WantType, e.SendDontHave, e.TTL)
+		source, err := corepeer.Decode(string(e.Source))
+		if err != nil {
+			return nil, err
+		}
+		m.addEntry(e.Block.Cid, e.Priority, e.Cancel, e.WantType, e.SendDontHave, e.TTL, source)
 	}
 
 	// deprecated
@@ -307,17 +317,47 @@ func (m *impl) Remove(k cid.Cid) {
 	delete(m.wantlist, k)
 }
 
+// Cancel cancels for every source. It cancels the whole CID (if we send a cancel
+//it means the relay session already has the block).
 func (m *impl) Cancel(k cid.Cid) int {
-	return m.addEntry(k, 0, true, pb.Message_Wantlist_Block, false, 0)
+	return m.addEntry(k, 0, true, pb.Message_Wantlist_Block, false, 0, "")
 }
 
-func (m *impl) AddEntry(k cid.Cid, priority int32, wantType pb.Message_Wantlist_WantType, sendDontHave bool, ttl int32) int {
-	return m.addEntry(k, priority, false, wantType, sendDontHave, ttl)
+func (m *impl) AddEntry(k cid.Cid, priority int32, wantType pb.Message_Wantlist_WantType, sendDontHave bool, ttl int32, source peer.ID) int {
+	return m.addEntry(k, priority, false, wantType, sendDontHave, ttl, source)
 }
 
-func (m *impl) addEntry(c cid.Cid, priority int32, cancel bool, wantType pb.Message_Wantlist_WantType, sendDontHave bool, ttl int32) int {
+func (m *impl) addEntry(c cid.Cid, priority int32, cancel bool, wantType pb.Message_Wantlist_WantType, sendDontHave bool, ttl int32, source peer.ID) int {
 	e, exists := m.wantlist[c]
 	if exists {
+
+		// TODO: The ideal implementation would include a source for each entry in the wantlist
+		// that way we can add in the same Bitswap message envolope wants from different sources.
+
+		// // If I am receiving a message with a different source for the same CID,
+		// // is an independent request for a relaySession.
+		// fmt.Println(e.Source, source)
+		// if e.Source != source {
+		// 	e = &Entry{
+		// 		Entry: wantlist.Entry{
+		// 			Cid:      c,
+		// 			Priority: priority,
+		// 			WantType: wantType,
+		// 			TTL:      ttl,
+		// 			Source:   source,
+		// 		},
+		// 		SendDontHave: sendDontHave,
+		// 		Cancel:       cancel,
+		// 	}
+		// 	m.wantlist[c] = e
+
+		// 	return e.Size()
+		// }
+		// For now we change to the new source to update everyone
+		// about the new peer looking for the CID.
+		if e.Source != source {
+			e.Source = source
+		}
 		// Only change priority if want is of the same type
 		if e.WantType == wantType {
 			e.Priority = priority
@@ -348,6 +388,7 @@ func (m *impl) addEntry(c cid.Cid, priority int32, cancel bool, wantType pb.Mess
 			Priority: priority,
 			WantType: wantType,
 			TTL:      ttl,
+			Source:   source,
 		},
 		SendDontHave: sendDontHave,
 		Cancel:       cancel,

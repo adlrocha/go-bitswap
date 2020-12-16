@@ -392,7 +392,7 @@ func (e *Engine) nextEnvelope(ctx context.Context) (*Envelope, error) {
 		// 	log.Debugf("local: %v Removing key from relay session as it's being sent.")
 
 		// 	// TODO: Here we should remove all blocks from relay sessions
-		// 	// to avoid having data we haven't requested explicitly. I am going to address
+		// 	// to avoid having data that we haven't requested explicitly. I am going to address
 		// 	// this in the future, because I could remove blocks that belong exclusively
 		// 	// to active relay sessions, but I don't know if a direct session
 		// 	// requested it before and I am "garbage collecting" useful information
@@ -544,7 +544,7 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 		blockSize, found := blockSizes[entry.Cid]
 
 		// Add each want-have / want-block to the ledger
-		l.Wants(c, entry.Priority, entry.WantType, entry.TTL)
+		l.Wants(c, entry.Priority, entry.WantType, entry.TTL, entry.Source)
 
 		// If the block was not found
 		if !found {
@@ -552,7 +552,8 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 
 			if entry.TTL > 0 {
 				// If we still have TTL add CIDs to start an relay session for that TTL.
-				log.Debugf("Updating tracker to start a new relay session for %s, %d, %d", entry.Cid, entry.TTL, entry.Priority)
+				log.Debugf("local: %v - Updating tracker to start a new relay session for %s, %d, %v", e.self,
+					entry.Cid, entry.TTL, entry.Source)
 				// NOTE: In a previous implementation, the entry.Priority was being introduced
 				// in the tracker and this was creating the generation of sessions with
 				// individual blocks that were inefficient and ended up not finding all
@@ -562,8 +563,7 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 				// different priorities, but this requires additonal implementation that
 				// I am not going to approach in this first implementation.
 				// relayKs.updateTracker(entry.TTL, entry.Priority, entry.Cid)
-
-				relayKs.UpdateTracker(entry.Cid, entry.TTL)
+				relayKs.UpdateTracker(entry.Cid, entry.TTL, entry.Source)
 			}
 			// Only add the task to the queue if the requester wants a DONT_HAVE
 			//
@@ -622,23 +622,26 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 		}
 	}
 
+	log.Debugf("Length relay KS: %v, ", len(relayKs.T), relayKs.T)
 	// If there are relayKs
 	if len(relayKs.T) > 0 {
 		// if the relaySession hasn't been started then start it.
 		if e.relaySession.Session == nil {
 			// We initially start the relay session with TTL=0, each WANT message should
 			// be prepared with the right TTL.
-			log.Debugf("local: %v Starting relaySession %v, %v", e.self, p)
+			log.Debugf("local: %v Starting relaySession %v", e.self, p)
 			// TODO:Add this as a private attribute of relaySession so that
 			// can't be unintentionally modified.
+			log.Debugf("RelayRegistry: %v", e.relaySession.Registry)
 			e.relaySession.Session = e.sm.StartRelaySession(ctx,
 				defaultProvSearchDelay,
 				delay.Fixed(time.Minute), 0,
 				e.relaySession.Registry)
+			log.Debugf("RelaySession: %v", e.relaySession.Session)
 		}
 		// Update relaySession with new keys. This function start new GetBlocks
 		// if there is no active search for any of the keys.
-		e.relaySession.UpdateSession(ctx, relayKs)
+		e.relaySession.UpdateSession(ctx, e.self, relayKs)
 	}
 
 	// Push entries onto the request queue

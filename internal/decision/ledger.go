@@ -28,9 +28,9 @@ type ledger struct {
 	lk sync.RWMutex
 }
 
-func (l *ledger) Wants(k cid.Cid, priority int32, wantType pb.Message_Wantlist_WantType, ttl int32) {
+func (l *ledger) Wants(k cid.Cid, priority int32, wantType pb.Message_Wantlist_WantType, ttl int32, source peer.ID) {
 	log.Debugf("peer %s wants %s with ttl %d", l.Partner, k, ttl)
-	l.wantList.Add(k, priority, wantType, ttl)
+	l.wantList.Add(k, priority, wantType, ttl, source)
 }
 
 func (l *ledger) CancelWant(k cid.Cid) bool {

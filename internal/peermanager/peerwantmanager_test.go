@@ -49,6 +49,10 @@ func (mpq *mockPQ) clear() {
 func (mpq *mockPQ) Startup()  {}
 func (mpq *mockPQ) Shutdown() {}
 
+func (mpq *mockPQ) AddBroadcastRelayHaves(whs []cid.Cid, p peer.ID, ttl int32) {
+	mpq.bcst = append(mpq.bcst, whs...)
+}
+
 func (mpq *mockPQ) AddBroadcastWantHaves(whs []cid.Cid, ttl int32) {
 	mpq.bcst = append(mpq.bcst, whs...)
 }

@@ -43,7 +43,9 @@ type fakeSesPeerManager struct {
 }
 
 func TestKeyTracker(t *testing.T) {
-	p := testutil.GeneratePeers(1)[0]
+	peers := testutil.GeneratePeers(2)
+	p := peers[0]
+	s := peers[1]
 	kt := NewKeyTracker(p)
 	if len(kt.T) != 0 || kt.Peer != p {
 		t.Fatal("Tracker not initialized successfully")
@@ -52,8 +54,8 @@ func TestKeyTracker(t *testing.T) {
 	var i int32 = 0
 	cids := testutil.GenerateCids(3)
 	for _, c := range cids {
-		kt.UpdateTracker(c, i)
-		if kt.T[i].TTL != i || kt.T[i].Key != c {
+		kt.UpdateTracker(c, i, s)
+		if kt.T[i].TTL != i || kt.T[i].Key != c || kt.T[i].Source != s {
 			t.Fatalf("Wrong individual CID update Got: %s, %d - Expected: %s, %d",
 				kt.T[i].Key, kt.T[i].TTL, c, i)
 		}
@@ -64,7 +66,9 @@ func TestKeyTracker(t *testing.T) {
 	}
 }
 func TestRelaySessions(t *testing.T) {
-	peers := testutil.GeneratePeers(2)
+	peers := testutil.GeneratePeers(4)
+	s := peers[2]
+	self := peers[3]
 	keys := testutil.GenerateCids(5)
 	rs := NewRelaySession(10)
 	if rs.Registry.Degree != 10 || rs.Session != nil {
@@ -75,22 +79,22 @@ func TestRelaySessions(t *testing.T) {
 	kt1 := NewKeyTracker(peers[0])
 	kt2 := NewKeyTracker(peers[1])
 	for _, c := range keys[:3] {
-		kt1.UpdateTracker(c, 1)
+		kt1.UpdateTracker(c, 1, s)
 	}
 	for _, c := range keys[2:] {
-		kt2.UpdateTracker(c, 2)
+		kt2.UpdateTracker(c, 2, s)
 	}
 
 	// Start new relaySession
 	rs.Session = &fakeSession{}
 
-	rs.UpdateSession(context.Background(), kt1)
+	rs.UpdateSession(context.Background(), self, kt1)
 	if len(rs.InterestedPeers(keys[0])) != 1 &&
 		len(rs.InterestedPeers(keys[len(keys)-1])) != 0 {
 		t.Fatal("First session update failed")
 	}
 
-	rs.UpdateSession(context.Background(), kt2)
+	rs.UpdateSession(context.Background(), self, kt2)
 	if len(rs.InterestedPeers(keys[2])) != 2 &&
 		len(rs.InterestedPeers(keys[len(keys)])) != 1 {
 		t.Fatal("Second session update failed")
@@ -99,6 +103,10 @@ func TestRelaySessions(t *testing.T) {
 	if rs.Registry.GetTTL(keys[0]) != 1 ||
 		rs.Registry.GetTTL(keys[len(keys)-1]) != 2 {
 		t.Fatal("Get TTL failed")
+	}
+
+	if a := rs.Registry.GetSource(keys[0]); a != s {
+		t.Fatal("Wrong source retrieved", a, s)
 	}
 
 	rs.RemoveInterest(keys[0], peers[0])
@@ -116,4 +124,37 @@ func TestRelaySessions(t *testing.T) {
 	if !found {
 		t.Fatal("Something went wrong removing peers")
 	}
+
+	rs.BlockSent(keys[2])
+	ps = rs.InterestedPeers(keys[2])
+	if len(ps) != 0 {
+		t.Fatal("CID for block sent not cleared")
+	}
+
+}
+
+func TestUpdateSelf(t *testing.T) {
+	peers := testutil.GeneratePeers(4)
+	self := peers[3]
+	keys := testutil.GenerateCids(5)
+	rs := NewRelaySession(10)
+	if rs.Registry.Degree != 10 || rs.Session != nil {
+		t.Fatal("Error initializing relaySession")
+	}
+
+	// Initialize keytracker
+	kt1 := NewKeyTracker(peers[0])
+	for _, c := range keys {
+		// The source of WANTs is self
+		kt1.UpdateTracker(c, 1, self)
+	}
+
+	// Start new relaySession
+	rs.Session = &fakeSession{}
+
+	rs.UpdateSession(context.Background(), self, kt1)
+	if len(rs.InterestedPeers(keys[0])) != 0 {
+		t.Fatal("Added interested and started relaySession for WANT where I am the source")
+	}
+
 }

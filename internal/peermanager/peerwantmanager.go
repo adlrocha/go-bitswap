@@ -117,7 +117,7 @@ func (pwm *peerWantManager) removePeer(p peer.ID) {
 	delete(pwm.peerWants, p)
 }
 
-// Selected a random suset of peers according to the degree of the relay session.
+// Selected a random subset of peers according to the degree of the relay session.
 func (pwm *peerWantManager) selectRandomSubset(registry *rs.RelayRegistry) map[peer.ID]*peerWant {
 	filteredPeers := make(map[peer.ID]*peerWant)
 	rand.Seed(time.Now().UnixNano())
@@ -146,7 +146,7 @@ func (pwm *peerWantManager) selectRandomSubset(registry *rs.RelayRegistry) map[p
 	return filteredPeers
 }
 
-// broadcastWantHaves sends want-haves that doen't have it yet.
+// broadcastRelayWants sends want-haves that doesn't have it yet.
 func (pwm *peerWantManager) broadcastRelayWants(wantHaves []cid.Cid, registry *rs.RelayRegistry) {
 	unsent := make([]cid.Cid, 0, len(wantHaves))
 	for _, c := range wantHaves {
@@ -189,7 +189,7 @@ func (pwm *peerWantManager) broadcastRelayWants(wantHaves []cid.Cid, registry *r
 
 		if len(peerUnsent) > 0 {
 			for _, c := range peerUnsent {
-				pws.peerQueue.AddBroadcastWantHaves([]cid.Cid{c}, registry.GetTTL(c))
+				pws.peerQueue.AddBroadcastRelayHaves([]cid.Cid{c}, registry.GetSource(c), registry.GetTTL(c))
 			}
 		}
 	}

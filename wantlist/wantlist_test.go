@@ -5,9 +5,11 @@ import (
 
 	pb "github.com/ipfs/go-bitswap/message/pb"
 	cid "github.com/ipfs/go-cid"
+	peer "github.com/libp2p/go-libp2p-peer"
 )
 
 var testcids []cid.Cid
+var pid, err = peer.IDFromString("QmXpBrpV7YgQSUVG7wAmAgRhQsK8AuJh6X2VXztgSorPz3")
 
 func init() {
 	strs := []string{
@@ -42,11 +44,11 @@ func assertHasCid(t *testing.T, w wli, c cid.Cid) {
 func TestBasicWantlist(t *testing.T) {
 	wl := New()
 
-	if !wl.Add(testcids[0], 5, pb.Message_Wantlist_Block, 2) {
+	if !wl.Add(testcids[0], 5, pb.Message_Wantlist_Block, 2, pid) {
 		t.Fatal("expected true")
 	}
 	assertHasCid(t, wl, testcids[0])
-	if !wl.Add(testcids[1], 4, pb.Message_Wantlist_Block, 2) {
+	if !wl.Add(testcids[1], 4, pb.Message_Wantlist_Block, 2, pid) {
 		t.Fatal("expected true")
 	}
 	assertHasCid(t, wl, testcids[0])
@@ -56,7 +58,7 @@ func TestBasicWantlist(t *testing.T) {
 		t.Fatal("should have had two items")
 	}
 
-	if wl.Add(testcids[1], 4, pb.Message_Wantlist_Block, 2) {
+	if wl.Add(testcids[1], 4, pb.Message_Wantlist_Block, 2, pid) {
 		t.Fatal("add shouldnt report success on second add")
 	}
 	assertHasCid(t, wl, testcids[0])
@@ -79,8 +81,8 @@ func TestBasicWantlist(t *testing.T) {
 func TestAddHaveThenBlock(t *testing.T) {
 	wl := New()
 
-	wl.Add(testcids[0], 5, pb.Message_Wantlist_Have, 2)
-	wl.Add(testcids[0], 5, pb.Message_Wantlist_Block, 2)
+	wl.Add(testcids[0], 5, pb.Message_Wantlist_Have, 2, pid)
+	wl.Add(testcids[0], 5, pb.Message_Wantlist_Block, 2, pid)
 
 	e, ok := wl.Contains(testcids[0])
 	if !ok {
@@ -94,8 +96,8 @@ func TestAddHaveThenBlock(t *testing.T) {
 func TestAddBlockThenHave(t *testing.T) {
 	wl := New()
 
-	wl.Add(testcids[0], 5, pb.Message_Wantlist_Block, 2)
-	wl.Add(testcids[0], 5, pb.Message_Wantlist_Have, 2)
+	wl.Add(testcids[0], 5, pb.Message_Wantlist_Block, 2, pid)
+	wl.Add(testcids[0], 5, pb.Message_Wantlist_Have, 2, pid)
 
 	e, ok := wl.Contains(testcids[0])
 	if !ok {
@@ -109,7 +111,7 @@ func TestAddBlockThenHave(t *testing.T) {
 func TestAddHaveThenRemoveBlock(t *testing.T) {
 	wl := New()
 
-	wl.Add(testcids[0], 5, pb.Message_Wantlist_Have, 2)
+	wl.Add(testcids[0], 5, pb.Message_Wantlist_Have, 2, pid)
 	wl.RemoveType(testcids[0], pb.Message_Wantlist_Block)
 
 	_, ok := wl.Contains(testcids[0])
@@ -121,7 +123,7 @@ func TestAddHaveThenRemoveBlock(t *testing.T) {
 func TestAddBlockThenRemoveHave(t *testing.T) {
 	wl := New()
 
-	wl.Add(testcids[0], 5, pb.Message_Wantlist_Block, 2)
+	wl.Add(testcids[0], 5, pb.Message_Wantlist_Block, 2, pid)
 	wl.RemoveType(testcids[0], pb.Message_Wantlist_Have)
 
 	e, ok := wl.Contains(testcids[0])
@@ -136,7 +138,7 @@ func TestAddBlockThenRemoveHave(t *testing.T) {
 func TestAddHaveThenRemoveAny(t *testing.T) {
 	wl := New()
 
-	wl.Add(testcids[0], 5, pb.Message_Wantlist_Have, 2)
+	wl.Add(testcids[0], 5, pb.Message_Wantlist_Have, 2, pid)
 	wl.Remove(testcids[0])
 
 	_, ok := wl.Contains(testcids[0])
@@ -148,7 +150,7 @@ func TestAddHaveThenRemoveAny(t *testing.T) {
 func TestAddBlockThenRemoveAny(t *testing.T) {
 	wl := New()
 
-	wl.Add(testcids[0], 5, pb.Message_Wantlist_Block, 2)
+	wl.Add(testcids[0], 5, pb.Message_Wantlist_Block, 2, pid)
 	wl.Remove(testcids[0])
 
 	_, ok := wl.Contains(testcids[0])
@@ -159,13 +161,13 @@ func TestAddBlockThenRemoveAny(t *testing.T) {
 
 func TestAbsort(t *testing.T) {
 	wl := New()
-	wl.Add(testcids[0], 5, pb.Message_Wantlist_Block, 2)
-	wl.Add(testcids[1], 4, pb.Message_Wantlist_Have, 2)
-	wl.Add(testcids[2], 3, pb.Message_Wantlist_Have, 2)
+	wl.Add(testcids[0], 5, pb.Message_Wantlist_Block, 2, pid)
+	wl.Add(testcids[1], 4, pb.Message_Wantlist_Have, 2, pid)
+	wl.Add(testcids[2], 3, pb.Message_Wantlist_Have, 2, pid)
 
 	wl2 := New()
-	wl2.Add(testcids[0], 2, pb.Message_Wantlist_Have, 2)
-	wl2.Add(testcids[1], 1, pb.Message_Wantlist_Block, 2)
+	wl2.Add(testcids[0], 2, pb.Message_Wantlist_Have, 2, pid)
+	wl2.Add(testcids[1], 1, pb.Message_Wantlist_Block, 2, pid)
 
 	wl.Absorb(wl2)
 
@@ -215,9 +217,9 @@ func TestAbsort(t *testing.T) {
 func TestSortEntries(t *testing.T) {
 	wl := New()
 
-	wl.Add(testcids[0], 3, pb.Message_Wantlist_Block, 2)
-	wl.Add(testcids[1], 5, pb.Message_Wantlist_Have, 2)
-	wl.Add(testcids[2], 4, pb.Message_Wantlist_Have, 2)
+	wl.Add(testcids[0], 3, pb.Message_Wantlist_Block, 2, pid)
+	wl.Add(testcids[1], 5, pb.Message_Wantlist_Have, 2, pid)
+	wl.Add(testcids[2], 4, pb.Message_Wantlist_Have, 2, pid)
 
 	entries := wl.Entries()
 	SortEntries(entries)

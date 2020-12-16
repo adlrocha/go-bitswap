@@ -7,11 +7,15 @@ import (
 	pb "github.com/ipfs/go-bitswap/message/pb"
 	"github.com/ipfs/go-bitswap/wantlist"
 	blocksutil "github.com/ipfs/go-ipfs-blocksutil"
+	"github.com/libp2p/go-libp2p-core/peer"
 
 	blocks "github.com/ipfs/go-block-format"
 	cid "github.com/ipfs/go-cid"
 	u "github.com/ipfs/go-ipfs-util"
 )
+
+var pid, _ = peer.Decode("QmXpBrpV7YgQSUVG7wAmAgRhQsK8AuJh6X2VXztgSorPz3")
+var pid2, _ = peer.Decode("QmXpBrpV7YgQSUVG7wAmAgRhQsK8AuJh6X2VXztgSorPz1")
 
 func mkFakeCid(s string) cid.Cid {
 	return cid.NewCidV0(u.Hash([]byte(s)))
@@ -20,7 +24,7 @@ func mkFakeCid(s string) cid.Cid {
 func TestAppendWanted(t *testing.T) {
 	str := mkFakeCid("foo")
 	m := New(true)
-	m.AddEntry(str, 1, pb.Message_Wantlist_Block, true, 1)
+	m.AddEntry(str, 1, pb.Message_Wantlist_Block, true, 1, pid)
 
 	if !wantlistContains(&m.ToProtoV0().Wantlist, str) {
 		t.Fail()
@@ -31,14 +35,19 @@ func TestNewMessageFromProto(t *testing.T) {
 	str := mkFakeCid("a_key")
 	protoMessage := new(pb.Message)
 	protoMessage.Wantlist.Entries = []pb.Message_Wantlist_Entry{
-		{Block: pb.Cid{Cid: str}},
+		{Block: pb.Cid{Cid: str}, Source: []byte(pid.String())},
 	}
+
 	if !wantlistContains(&protoMessage.Wantlist, str) {
 		t.Fail()
 	}
 	m, err := newMessageFromProto(*protoMessage)
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	if m.Wantlist()[0].Source != pid {
+		t.Fatal("Source peer ID end-to-end marshall error", m.Wantlist()[0].Source, pid)
 	}
 
 	if !wantlistContains(&m.ToProtoV0().Wantlist, str) {
@@ -71,7 +80,7 @@ func TestWantlist(t *testing.T) {
 	keystrs := []cid.Cid{mkFakeCid("foo"), mkFakeCid("bar"), mkFakeCid("baz"), mkFakeCid("bat")}
 	m := New(true)
 	for _, s := range keystrs {
-		m.AddEntry(s, 1, pb.Message_Wantlist_Block, true, 1)
+		m.AddEntry(s, 1, pb.Message_Wantlist_Block, true, 1, pid)
 	}
 	exported := m.Wantlist()
 
@@ -94,7 +103,7 @@ func TestCopyProtoByValue(t *testing.T) {
 	str := mkFakeCid("foo")
 	m := New(true)
 	protoBeforeAppend := m.ToProtoV0()
-	m.AddEntry(str, 1, pb.Message_Wantlist_Block, true, 1)
+	m.AddEntry(str, 1, pb.Message_Wantlist_Block, true, 1, pid)
 	if wantlistContains(&protoBeforeAppend.Wantlist, str) {
 		t.Fail()
 	}
@@ -102,11 +111,11 @@ func TestCopyProtoByValue(t *testing.T) {
 
 func TestToNetFromNetPreservesWantList(t *testing.T) {
 	original := New(true)
-	original.AddEntry(mkFakeCid("M"), 1, pb.Message_Wantlist_Block, true, 1)
-	original.AddEntry(mkFakeCid("B"), 1, pb.Message_Wantlist_Block, true, 1)
-	original.AddEntry(mkFakeCid("D"), 1, pb.Message_Wantlist_Block, true, 1)
-	original.AddEntry(mkFakeCid("T"), 1, pb.Message_Wantlist_Block, true, 1)
-	original.AddEntry(mkFakeCid("F"), 1, pb.Message_Wantlist_Block, true, 1)
+	original.AddEntry(mkFakeCid("M"), 1, pb.Message_Wantlist_Block, true, 1, pid)
+	original.AddEntry(mkFakeCid("B"), 1, pb.Message_Wantlist_Block, true, 1, pid)
+	original.AddEntry(mkFakeCid("D"), 1, pb.Message_Wantlist_Block, true, 1, pid)
+	original.AddEntry(mkFakeCid("T"), 1, pb.Message_Wantlist_Block, true, 1, pid)
+	original.AddEntry(mkFakeCid("F"), 1, pb.Message_Wantlist_Block, true, 1, pid)
 
 	buf := new(bytes.Buffer)
 	if _, err := original.ToNetV1(buf); err != nil {
@@ -186,8 +195,8 @@ func TestDuplicates(t *testing.T) {
 	b := blocks.NewBlock([]byte("foo"))
 	msg := New(true)
 
-	msg.AddEntry(b.Cid(), 1, pb.Message_Wantlist_Block, true, 1)
-	msg.AddEntry(b.Cid(), 1, pb.Message_Wantlist_Block, true, 1)
+	msg.AddEntry(b.Cid(), 1, pb.Message_Wantlist_Block, true, 1, pid)
+	msg.AddEntry(b.Cid(), 1, pb.Message_Wantlist_Block, true, 1, pid)
 	if len(msg.Wantlist()) != 1 {
 		t.Fatal("Duplicate in BitSwapMessage")
 	}
@@ -203,6 +212,19 @@ func TestDuplicates(t *testing.T) {
 	msg.AddBlockPresence(b2.Cid(), pb.Message_Have)
 	if len(msg.Haves()) != 1 {
 		t.Fatal("Duplicate in BitSwapMessage")
+	}
+}
+
+func TestUpdateSource(t *testing.T) {
+	b := blocks.NewBlock([]byte("foo"))
+	msg := New(true)
+
+	msg.AddEntry(b.Cid(), 1, pb.Message_Wantlist_Block, true, 1, pid)
+	msg.AddEntry(b.Cid(), 1, pb.Message_Wantlist_Block, true, 1, pid2)
+	for _, e := range msg.Wantlist() {
+		if e.Source != pid2 {
+			t.Fatal("Source not updated")
+		}
 	}
 }
 
@@ -245,8 +267,8 @@ func TestAddWantlistEntry(t *testing.T) {
 	b := blocks.NewBlock([]byte("foo"))
 	msg := New(true)
 
-	msg.AddEntry(b.Cid(), 1, pb.Message_Wantlist_Have, false, 1)
-	msg.AddEntry(b.Cid(), 2, pb.Message_Wantlist_Block, true, 1)
+	msg.AddEntry(b.Cid(), 1, pb.Message_Wantlist_Have, false, 1, pid)
+	msg.AddEntry(b.Cid(), 2, pb.Message_Wantlist_Block, true, 1, pid)
 	entries := msg.Wantlist()
 	if len(entries) != 1 {
 		t.Fatal("Duplicate in BitSwapMessage")
@@ -262,13 +284,13 @@ func TestAddWantlistEntry(t *testing.T) {
 		t.Fatal("priority should only be overridden if wants are of same type")
 	}
 
-	msg.AddEntry(b.Cid(), 2, pb.Message_Wantlist_Block, true, 1)
+	msg.AddEntry(b.Cid(), 2, pb.Message_Wantlist_Block, true, 1, pid)
 	e = msg.Wantlist()[0]
 	if e.Priority != 2 {
 		t.Fatal("priority should be overridden if wants are of same type")
 	}
 
-	msg.AddEntry(b.Cid(), 3, pb.Message_Wantlist_Have, false, 1)
+	msg.AddEntry(b.Cid(), 3, pb.Message_Wantlist_Have, false, 1, pid)
 	e = msg.Wantlist()[0]
 	if e.WantType != pb.Message_Wantlist_Block {
 		t.Fatal("want-have should not override want-block")
@@ -286,7 +308,7 @@ func TestAddWantlistEntry(t *testing.T) {
 		t.Fatal("cancel should override want")
 	}
 
-	msg.AddEntry(b.Cid(), 10, pb.Message_Wantlist_Block, true, 1)
+	msg.AddEntry(b.Cid(), 10, pb.Message_Wantlist_Block, true, 1, pid)
 	if !e.Cancel {
 		t.Fatal("want should not override cancel")
 	}

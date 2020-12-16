@@ -40,6 +40,9 @@ func (fp *mockPeerQueue) AddCancels(cs []cid.Cid) {
 func (fp *mockPeerQueue) ResponseReceived(ks []cid.Cid) {
 }
 
+func (fp *mockPeerQueue) AddBroadcastRelayHaves(whs []cid.Cid, p peer.ID, ttl int32) {
+}
+
 type peerWants struct {
 	wantHaves  []cid.Cid
 	wantBlocks []cid.Cid
@@ -328,10 +331,11 @@ type benchPeerQueue struct {
 func (*benchPeerQueue) Startup()  {}
 func (*benchPeerQueue) Shutdown() {}
 
-func (*benchPeerQueue) AddBroadcastWantHaves(whs []cid.Cid, ttl int32)   {}
-func (*benchPeerQueue) AddWants(wbs []cid.Cid, whs []cid.Cid, ttl int32) {}
-func (*benchPeerQueue) AddCancels(cs []cid.Cid)                          {}
-func (*benchPeerQueue) ResponseReceived(ks []cid.Cid)                    {}
+func (*benchPeerQueue) AddBroadcastWantHaves(whs []cid.Cid, ttl int32)             {}
+func (*benchPeerQueue) AddWants(wbs []cid.Cid, whs []cid.Cid, ttl int32)           {}
+func (*benchPeerQueue) AddCancels(cs []cid.Cid)                                    {}
+func (*benchPeerQueue) ResponseReceived(ks []cid.Cid)                              {}
+func (*benchPeerQueue) AddBroadcastRelayHaves(whs []cid.Cid, p peer.ID, ttl int32) {}
 
 // Simplistic benchmark to allow us to stress test
 func BenchmarkPeerManager(b *testing.B) {
