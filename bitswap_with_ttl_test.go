@@ -383,7 +383,7 @@ func TestComplexTopologyAndWaves(t *testing.T) {
 	// logging.SetLogLevel("engine", "DEBUG")
 	// logging.SetLogLevel("bitswap", "DEBUG")
 
-	var ttl int32 = 1
+	var ttl int32 = 2
 	bsOpts := []bitswap.Option{
 		bitswap.SetTTL(ttl),
 	}
