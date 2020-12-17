@@ -4,7 +4,7 @@ require (
 	contrib.go.opencensus.io/exporter/jaeger v0.2.1
 	github.com/cskr/pubsub v1.0.2
 	github.com/gogo/protobuf v1.3.1
-	github.com/golang/protobuf v1.3.2 // 
+	github.com/golang/protobuf v1.3.5 //
 	github.com/google/uuid v1.1.1
 	github.com/ipfs/go-block-format v0.0.2
 	github.com/ipfs/go-cid v0.0.5
@@ -31,8 +31,8 @@ require (
 	github.com/multiformats/go-multistream v0.1.1
 	go.opencensus.io v0.22.4
 	go.uber.org/zap v1.14.1
-	golang.org/x/sync v0.0.0-20190423024810-112230192c58
-	google.golang.org/appengine v1.4.0
+	golang.org/x/sync v0.0.0-20200625203802-6e8e738ad208
+	google.golang.org/appengine v1.6.5
 )
 
 // replace github.com/ipfs/go-bitswap => github.com/adlrocha/go-bitswap v0.2.19

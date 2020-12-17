@@ -3,6 +3,7 @@ package relaysession
 import (
 	"context"
 	"sync"
+	"time"
 
 	cid "github.com/ipfs/go-cid"
 	exchange "github.com/ipfs/go-ipfs-exchange-interface"
@@ -13,7 +14,8 @@ import (
 var log = logging.Logger("relaysession")
 
 type RelayRegistry struct {
-	r      map[cid.Cid]map[peer.ID]int32
+	b      map[cid.Cid]map[peer.ID]int32 // Information about seen blocks for each peer in relay session
+	r      map[cid.Cid]map[peer.ID]int32 // Information about interested peers.
 	Degree int32
 	lk     sync.RWMutex
 }
@@ -26,10 +28,23 @@ type RelaySession struct {
 	// PeerBlockRegistry
 }
 
+func (rs *RelaySession) BlockSeen(c cid.Cid, p peer.ID) {
+	// RemoveInterest from this peer becaues he has sent the block for that CID (avoid resending)
+	rs.RemoveInterest(c, p)
+	rs.Registry.lk.Lock()
+	defer rs.Registry.lk.Unlock()
+	// Add in list of blocks seen (this is redundant)
+	if rs.Registry.b[c] == nil {
+		rs.Registry.b[c] = make(map[peer.ID]int32, 0)
+	}
+	rs.Registry.b[c][p] = int32(time.Now().Unix())
+}
+
 func NewRelaySession(degree int32) *RelaySession {
 	return &RelaySession{
 		Session: nil,
 		Registry: &RelayRegistry{
+			b:      make(map[cid.Cid]map[peer.ID]int32, 0),
 			r:      make(map[cid.Cid]map[peer.ID]int32, 0),
 			Degree: degree,
 		},
@@ -74,7 +89,15 @@ func (rs *RelaySession) InterestedPeers(c cid.Cid) map[peer.ID]int32 {
 	// Create brand new map to avoid data races.
 	res := make(map[peer.ID]int32)
 	for k, v := range rs.Registry.r[c] {
-		res[k] = v
+		// Check if the peer already forwarded us this block. In that¡
+		// case do not consider him interested anymore. Don't forward
+		// block to him.
+		// We could check the timestamp here to be sure that
+		// the peer hasn't garbag collected the block.
+		if _, ok := rs.Registry.b[c][k]; !ok {
+			res[k] = v
+		}
+
 	}
 	return res
 }

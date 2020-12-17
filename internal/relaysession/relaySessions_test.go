@@ -101,7 +101,7 @@ func TestRelaySessions(t *testing.T) {
 		t.Fatal("Get TTL failed")
 	}
 
-	rs.RemoveInterest(keys[0], peers[0])
+	rs.BlockSeen(keys[0], peers[0])
 	rs.RemoveInterest(keys[0], peers[0])
 	rs.RemoveInterest(keys[2], peers[0])
 	ps := rs.InterestedPeers(keys[2])
