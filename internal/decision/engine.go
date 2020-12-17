@@ -694,6 +694,9 @@ func (e *Engine) ReceiveFrom(from peer.ID, blks []blocks.Block, haves []cid.Cid)
 		// Get the size of each block
 		blockSizes[blk.Cid()] = len(blk.RawData())
 
+		// Track who have sent a block for this CID to prevent sending it back
+		// to him if in my interested list.
+		e.relaySession.BlockSeen(blk.Cid(), from)
 		// Forward every block received to peers from relay sessions
 		// interested in them.
 		interestedPeers := e.relaySession.InterestedPeers(blk.Cid())

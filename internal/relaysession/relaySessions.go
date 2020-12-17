@@ -36,6 +36,13 @@ func NewRelaySession(degree int32) *RelaySession {
 	}
 }
 
+// BlockSeen removes interest in relaySession if a peer interested have sent
+// already the block to prevent from forwarding to it again.
+func (rs *RelaySession) BlockSeen(c cid.Cid, p peer.ID) {
+	// RemoveInterest from this peer becaues he has sent the block for that CID (avoid resending)
+	rs.RemoveInterest(c, p)
+}
+
 // RemoveInterest removes interest for a CID from a peer from the registry.
 func (rs *RelaySession) RemoveInterest(c cid.Cid, p peer.ID) {
 	rs.Registry.lk.Lock()

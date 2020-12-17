@@ -359,47 +359,54 @@ func (s *Session) run(ctx context.Context) {
 // all peers in the session have sent DONT_HAVE for a particular set of CIDs.
 // Send want-haves to all connected peers, and search for new peers with the CID.
 func (s *Session) broadcast(ctx context.Context, wants []cid.Cid) {
-	// If this broadcast is because of an idle timeout (we haven't received
-	// any blocks for a while) then broadcast all pending wants
-	if wants == nil {
-		wants = s.sw.PrepareBroadcast()
-	}
+	// Only direct session handle broadcast. Relay session follow requesters, they are reactive.
+	if !s.relay {
 
-	// Broadcast a want-have for the live wants to everyone we're connected to
-	s.broadcastWantHaves(ctx, wants)
+		// If this broadcast is because of an idle timeout (we haven't received
+		// any blocks for a while) then broadcast all pending wants
+		if wants == nil {
+			wants = s.sw.PrepareBroadcast()
+		}
 
-	// do not find providers on consecutive ticks
-	// -- just rely on periodic search widening
-	if len(wants) > 0 && (s.consecutiveTicks == 0) {
-		// Search for providers who have the first want in the list.
-		// Typically if the provider has the first block they will have
-		// the rest of the blocks also.
-		log.Debugw("FindMorePeers", "session", s.id, "cid", wants[0], "pending", len(wants))
-		s.findMorePeers(ctx, wants[0])
-	}
-	s.resetIdleTick()
+		// Broadcast a want-have for the live wants to everyone we're connected to
+		s.broadcastWantHaves(ctx, wants)
 
-	// If we have live wants record a consecutive tick
-	if s.sw.HasLiveWants() {
-		s.consecutiveTicks++
+		// do not find providers on consecutive ticks
+		// -- just rely on periodic search widening
+		if len(wants) > 0 && (s.consecutiveTicks == 0) {
+			// Search for providers who have the first want in the list.
+			// Typically if the provider has the first block they will have
+			// the rest of the blocks also.
+			log.Debugw("FindMorePeers", "session", s.id, "cid", wants[0], "pending", len(wants))
+			s.findMorePeers(ctx, wants[0])
+		}
+		s.resetIdleTick()
+
+		// If we have live wants record a consecutive tick
+		if s.sw.HasLiveWants() {
+			s.consecutiveTicks++
+		}
 	}
 }
 
 // handlePeriodicSearch is called periodically to search for providers of a
 // randomly chosen CID in the sesssion.
 func (s *Session) handlePeriodicSearch(ctx context.Context) {
-	randomWant := s.sw.RandomLiveWant()
-	if !randomWant.Defined() {
-		return
+	// Periodic broadcast disabled in relay sessions
+	if !s.relay {
+		randomWant := s.sw.RandomLiveWant()
+		if !randomWant.Defined() {
+			return
+		}
+
+		// TODO: come up with a better strategy for determining when to search
+		// for new providers for blocks.
+		s.findMorePeers(ctx, randomWant)
+
+		s.broadcastWantHaves(ctx, []cid.Cid{randomWant})
+
+		s.periodicSearchTimer.Reset(s.periodicSearchDelay.NextWaitTime())
 	}
-
-	// TODO: come up with a better strategy for determining when to search
-	// for new providers for blocks.
-	s.findMorePeers(ctx, randomWant)
-
-	s.broadcastWantHaves(ctx, []cid.Cid{randomWant})
-
-	s.periodicSearchTimer.Reset(s.periodicSearchDelay.NextWaitTime())
 }
 
 // findMorePeers attempts to find more peers for a session by searching for
