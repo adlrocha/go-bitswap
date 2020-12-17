@@ -334,6 +334,9 @@ func (e *Engine) taskWorkerExit() {
 // nextEnvelope runs in the taskWorker goroutine. Returns an error if the
 // context is cancelled before the next Envelope can be created.
 func (e *Engine) nextEnvelope(ctx context.Context) (*Envelope, error) {
+	// ctx, span := trace.StartSpan(ctx, "engine.nextEnvelope")
+	// defer span.End()
+
 	for {
 		// Pop some tasks off the request queue
 		p, nextTasks, pendingBytes := e.peerRequestQueue.PopTasks(targetMessageSize)
@@ -372,9 +375,15 @@ func (e *Engine) nextEnvelope(ctx context.Context) (*Envelope, error) {
 					blockTasks[c] = td
 				} else {
 					// Add HAVES to the message
+					// span.Annotate([]trace.Attribute{
+					// 	trace.StringAttribute("HAVE", c.String()),
+					// }, "HAVE")
 					msg.AddHave(c)
 				}
 			} else {
+				// span.Annotate([]trace.Attribute{
+				// 	trace.StringAttribute("DONT HAVE", c.String()),
+				// }, "DONT HAVE")
 				// Add DONT_HAVEs to the message
 				msg.AddDontHave(c)
 			}
@@ -416,11 +425,17 @@ func (e *Engine) nextEnvelope(ctx context.Context) (*Envelope, error) {
 			if blk == nil {
 				// If the client requested DONT_HAVE, add DONT_HAVE to the message
 				if t.SendDontHave {
+					// span.Annotate([]trace.Attribute{
+					// 	trace.StringAttribute("DONT HAVE", c.String()),
+					// }, "DONT HAVE")
 					msg.AddDontHave(c)
 				}
 			} else {
 				// Add the block to the message
 				// log.Debugf("  make evlp %s->%s block: %s (%d bytes)", e.self, p, c, len(blk.RawData()))
+				// span.Annotate([]trace.Attribute{
+				// 	trace.StringAttribute("BLOCK", c.String()),
+				// }, "BLOCK")
 				msg.AddBlock(blk)
 			}
 		}
@@ -470,6 +485,8 @@ func (e *Engine) Peers() []peer.ID {
 // request queue (this is later popped off by the workerTasks)
 func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwapMessage) {
 	entries := m.Wantlist()
+	// ctx, span := trace.StartSpan(ctx, "engine.MessageReceived")
+	// defer span.End()
 
 	if len(entries) > 0 {
 		log.Debugw("Bitswap engine <- msg", "local", e.self, "from", p, "entryCount", len(entries))
@@ -529,6 +546,9 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 
 		// Remove cancelled blocks from the queue
 		log.Debugw("Bitswap engine <- cancel", "local", e.self, "from", p, "cid", entry.Cid)
+		// span.Annotate([]trace.Attribute{
+		// 	trace.StringAttribute("CANCEL", entry.Cid.String()),
+		// }, "CANCEL")
 		if l.CancelWant(entry.Cid) {
 			e.peerRequestQueue.Remove(entry.Cid, p)
 		}
@@ -645,6 +665,7 @@ func (e *Engine) MessageReceived(ctx context.Context, p peer.ID, m bsmsg.BitSwap
 	if len(activeEntries) > 0 {
 		e.peerRequestQueue.PushTasks(p, activeEntries...)
 	}
+
 }
 
 // Split the want-have / want-block entries from the cancel entries
@@ -678,6 +699,7 @@ func (e *Engine) ReceiveFrom(from peer.ID, blks []blocks.Block, haves []cid.Cid)
 		// Record how many bytes were received in the ledger
 		// TODO: Should we account for relay blocks that will be forwarded also? Because we are doing so.
 		for _, blk := range blks {
+
 			log.Debugw("Bitswap engine <- block", "local", e.self, "from", from, "cid", blk.Cid(), "size", len(blk.RawData()))
 			e.scoreLedger.AddToReceivedBytes(l.Partner, len(blk.RawData()))
 		}
